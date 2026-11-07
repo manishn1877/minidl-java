@@ -1,1 +1,0 @@
-# minidl-java
