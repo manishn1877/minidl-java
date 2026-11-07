@@ -1,0 +1,10 @@
+out/
+*.class
+delivery-*.txt
+mnist-model.txt
+*.bin
+mnist/
+cifar/
+cifar-src/
+.idea/
+*.iml
