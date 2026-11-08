@@ -84,21 +84,6 @@ public class Tensor {
         return s;
     }
 
-    private static final ThreadLocal<float[]> SCRATCH2 = ThreadLocal.withInitial(() -> new float[0]);
-
-    /** A second reusable work array for this thread (used to hold one dequantized layer while it is being applied). */
-    static float[] scratchB(int n) {
-        float[] s = SCRATCH2.get();
-        if (s.length < n) { s = new float[n]; SCRATCH2.set(s); }
-        return s;
-    }
-
-    /** c[rows x N] = a[rows x K] . b[K x N] on raw arrays (offsets ao, bo, co), using the fast kernel and all cores when the job is big. */
-    static void matmulRaw(float[] a, int ao, int rows, int K, float[] b, int bo, int N, float[] c, int co) {
-        Arrays.fill(c, co, co + rows * N, 0f);
-        forRowBlocks(rows, (long) rows * K * N, (f, t) -> gemmNN(a, ao, K, b, bo, N, c, co, f, t));
-    }
-
     // ------------------------------------------------------------------ raw kernels (also used by Conv2D)
     // gemmNN / gemmNT / gemmTN pick the fast kernel when it is on and the sizes are big enough to pay off.
 

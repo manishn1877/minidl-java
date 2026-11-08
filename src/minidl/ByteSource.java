@@ -48,4 +48,10 @@ public class ByteSource implements DataSource {
 
     /** Memory held by the byte arrays (shared by all views). */
     public long bytes() { return (long) pixels.length + labels.length; }
+
+    /** The picture bytes of this view (count * dim), copied. */
+    public byte[] copyPixels() { return java.util.Arrays.copyOfRange(pixels, offset * dim, (offset + count) * dim); }
+
+    /** The class numbers of this view, copied. */
+    public byte[] copyLabels() { return java.util.Arrays.copyOfRange(labels, offset, offset + count); }
 }

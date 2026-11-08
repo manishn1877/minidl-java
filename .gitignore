@@ -8,3 +8,9 @@ cifar/
 cifar-src/
 .idea/
 *.iml
+feedback.bin
+*-tuned.bin
+emnist/
+feedback-letters.bin
+dist/
+feedback-all.bin

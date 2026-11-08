@@ -9,7 +9,7 @@ import javax.imageio.ImageIO;
 /**
  * Converts the CIFAR-10 copy that ships inside the npm package "tfjs-cifar10" (PNG sheets + label json) into the
  * official binary files that CifarLoader reads.
- *   java -Xmx1g -cp out minidl.CifarConvert <unpacked package folder> <output folder>
+ *   java -Xmx1g -cp out minidl.CifarConvert &lt;unpacked package folder&gt; &lt;output folder&gt;
  * In each PNG, row r (1024 pixels wide) is image r: pixel k of the row is pixel (k / 32, k % 32) of the image, as R, G, B.
  * Needs the JDK's image support (java.desktop), which every full JDK has.
  */

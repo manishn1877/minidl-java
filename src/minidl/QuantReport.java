@@ -2,7 +2,7 @@ package minidl;
 
 import java.util.Random;
 
-/** Loads a saved binary MNIST model and prints the shrink table.  java -cp out minidl.QuantReport model.bin <mnist-folder> */
+/** Loads a saved binary MNIST model and prints the shrink table.  java -cp out minidl.QuantReport model.bin &lt;mnist-folder&gt; */
 public class QuantReport {
     public static void main(String[] a) throws Exception {
         Sequential m = ModelIO.loadModelBinary(a[0], new Random(1));

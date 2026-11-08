@@ -5,7 +5,7 @@ import java.util.Random;
 
 /**
  * Handwritten digits (MNIST).
- *   java -cp out minidl.MnistDemo  <folder>  [epochs=10]  [mlp|cnn=cnn]  [trainLimit=60000]  [aug] [mmap]
+ *   java -cp out minidl.MnistDemo  &lt;folder&gt;  [epochs=10]  [mlp|cnn=cnn]  [trainLimit=60000]  [aug] [mmap]
  *   aug   = train on randomly shifted + rotated digits (data augmentation)
  *   mmap  = keep the image files ON DISK (memory-mapped); almost no heap memory is used for data
  * Files (either .gz or unzipped): train-images-idx3-ubyte, train-labels-idx1-ubyte,
@@ -81,7 +81,6 @@ public class MnistDemo {
 
     /** Float32 versus every shrink option: memory, accuracy and prediction time on the test digits. */
     static void quantTable(Sequential m, DataSource test) {
-        m.accuracy(test); // warm-up pass, so the first row is not slowed by the JIT compiler
         System.out.printf("%n%-28s %10s %10s %10s%n", "model", "weights KB", "accuracy", "time (s)");
         row("float32", m, test);
         row("bfloat16 (Dense)", Quantizer.toBF16(m), test);

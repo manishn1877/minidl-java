@@ -15,12 +15,13 @@ public final class Activations {
             int n = x.data.length, words = (n + 63) >>> 6;
             if (mask.length < words) mask = new long[words];
             Tensor out = new Tensor(x.rows, x.cols);
-            final float[] xd = x.data, od = out.data;
-            for (int i = 0; i < n; i++) { float v = xd[i]; od[i] = v > 0f ? v : 0f; }   // simple loop: the JIT turns it into SIMD
-            for (int w = 0; w < words; w++) {                                            // then the sign bits, without branches
+            for (int w = 0; w < words; w++) {
                 int base = w << 6, end = Math.min(n, base + 64);
-                long bits = 0L;
-                for (int i = base; i < end; i++) bits |= (xd[i] > 0f ? 1L : 0L) << (i - base);
+                long bits = 0;
+                for (int i = base; i < end; i++) {
+                    float v = x.data[i];
+                    if (v > 0) { out.data[i] = v; bits |= 1L << (i - base); }
+                }
                 mask[w] = bits;
             }
             return out;
@@ -28,14 +29,7 @@ public final class Activations {
 
         @Override public Tensor backward(Tensor g) {
             Tensor out = new Tensor(g.rows, g.cols);
-            final float[] gd = g.data, od = out.data;
-            int n = gd.length;
-            for (int w = 0; w < ((n + 63) >>> 6); w++) {
-                long m = mask[w];
-                if (m == 0L) continue;
-                int base = w << 6, end = Math.min(n, base + 64);
-                for (int i = base; i < end; i++) od[i] = ((m >>> (i - base)) & 1L) != 0L ? gd[i] : 0f;
-            }
+            for (int i = 0; i < g.data.length; i++) if (((mask[i >>> 6] >>> (i & 63)) & 1L) != 0) out.data[i] = g.data[i];
             return out;
         }
     }

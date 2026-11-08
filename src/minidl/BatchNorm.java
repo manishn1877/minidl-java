@@ -61,12 +61,12 @@ public class BatchNorm implements Layer {
 
         invStd = new double[f];
         for (int j = 0; j < f; j++) invStd[j] = 1.0 / Math.sqrt(var[j] + EPS);
-        xhat = training ? new Tensor(n, f) : null;      // only backward needs it
+        xhat = new Tensor(n, f);
         Tensor out = new Tensor(n, f);
         for (int i = 0; i < n; i++)
             for (int j = 0; j < f; j++) {
                 float h = (float) ((x.data[i * f + j] - mean[j]) * invStd[j]);
-                if (xhat != null) xhat.data[i * f + j] = h;
+                xhat.data[i * f + j] = h;
                 out.data[i * f + j] = gamma.value.data[j] * h + beta.value.data[j];
             }
         return out;

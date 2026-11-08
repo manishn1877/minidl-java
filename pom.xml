@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maven build for MiniDL. No dependencies at all. `mvn verify` compiles, runs the test suite and builds the jars. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.manishn1877</groupId>
+  <artifactId>minidl</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>MiniDL</name>
+  <description>A tiny deep learning library in pure Java: tensors, backprop, CNNs, transformers, quantization. No dependencies.</description>
+  <url>https://github.com/manishn1877/minidl-java</url>
+  <licenses><license><name>See LICENSE</name><url>https://github.com/manishn1877/minidl-java/blob/main/LICENSE</url></license></licenses>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <resources>
+      <resource><directory>.</directory><includes><include>web/index.html</include></includes></resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
+        <configuration><compilerArgs><arg>-Xlint:all</arg></compilerArgs></configuration>
+      </plugin>
+      <!-- the project's own test suite (a plain main program), run in a separate JVM after compiling -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><version>3.3.0</version>
+        <executions><execution>
+          <id>run-tests</id><phase>test</phase><goals><goal>exec</goal></goals>
+          <configuration>
+            <executable>java</executable>
+            <arguments><argument>-Dminidl.vector=false</argument><argument>-cp</argument><classpath/><argument>minidl.Tests</argument></arguments>
+          </configuration>
+        </execution></executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.4.2</version>
+        <configuration><archive><manifest><mainClass>minidl.MiniDL</mainClass><addDefaultImplementationEntries>true</addDefaultImplementationEntries></manifest></archive></configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-source-plugin</artifactId><version>3.3.1</version>
+        <executions><execution><id>sources</id><goals><goal>jar-no-fork</goal></goals></execution></executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-javadoc-plugin</artifactId><version>3.10.1</version>
+        <configuration><doclint>all,-missing</doclint></configuration>
+        <executions><execution><id>javadoc</id><goals><goal>jar</goal></goals></execution></executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

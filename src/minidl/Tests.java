@@ -63,8 +63,10 @@ public class Tests {
         shapeInference();
         autogradLayers();
         cifarAndColour();
-        batchNorm2dAndLstm();
-        checkpointing();
+        handwriting();
+        letters();
+        hostileFiles();
+        alnum();
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
@@ -1503,134 +1505,135 @@ public class Tests {
         check("shifted colour images: the red, green and blue dots end up at the same place", sameMove);
     }
 
-    // ------------------------------------------------------------------ round 5: BatchNorm2D and LSTM
+    // ------------------------------------------------------------------ handwriting app
+    static void handwriting() {
+        int w = 120, h = 80;
+        float[] ink = new float[w * h];
+        for (int y = 5; y < 25; y++) for (int x = 90; x < 100; x++) ink[y * w + x] = 1f; // a thin bar in the top-right corner
+        float[] px = DigitPreprocess.toMnist(ink, w, h);
+        double mass = 0, cx = 0, cy = 0; float max = 0;
+        for (int i = 0; i < 784; i++) { mass += px[i]; cx += px[i] * (i % 28); cy += px[i] * (i / 28); max = Math.max(max, px[i]); }
+        check("preprocess: a shape in the corner ends up centred in the 28x28 picture (centre of mass 13.5 +/- 0.6)",
+            Math.abs(cx / mass - 13.5) < 0.6 && Math.abs(cy / mass - 13.5) < 0.6);
+        check("preprocess: strongest pixel is 1.0 and the digit fits the 20 px box", max == 1f && px[0] == 0 && px[27] == 0 && px[27 * 28] == 0);
+        check("preprocess: a blank page gives null", DigitPreprocess.toMnist(new float[w * h], w, h) == null);
 
-    static void batchNorm2dAndLstm() throws Exception {
-        Random r = new Random(141);
-        BatchNorm2D bn = new BatchNorm2D(3, 4, 4);
-        Tensor x = Tensor.randn(6, 3 * 16, 3.0, r).map(v -> v + 5);
-        Tensor y = bn.forward(x);
-        boolean chanOk = true;
-        for (int c = 0; c < 3; c++) {
-            double m = 0, v = 0; int cnt = 0;
-            for (int i = 0; i < 6; i++) for (int p = 0; p < 16; p++) { m += y.get(i, c * 16 + p); cnt++; }
-            m /= cnt;
-            for (int i = 0; i < 6; i++) for (int p = 0; p < 16; p++) v += Math.pow(y.get(i, c * 16 + p) - m, 2);
-            v /= cnt;
-            if (Math.abs(m) > 1e-4 || Math.abs(Math.sqrt(v) - 1) > 1e-3) chanOk = false;
-        }
-        check("BatchNorm2D: every CHANNEL has mean 0 and std 1 over the batch and all pixel positions", chanOk);
-        for (int i = 0; i < 100; i++) bn.forward(x);
-        bn.setTraining(false);
-        check("BatchNorm2D uses running averages when predicting (close to the training output after many batches)", maxDiff(bn.forward(x), y) < 0.05);
+        float[] two = new float[w * h];
+        for (int y = 10; y < 60; y++) { for (int x = 10; x < 18; x++) two[y * w + x] = 1f; for (int x = 70; x < 90; x++) two[y * w + x] = 1f; }
+        two[2 * w + 50] = 1f; // one speck of dust between them
+        List<DigitPreprocess.Piece> parts = DigitPreprocess.segment(two, w, h);
+        check("segment: two digits with a gap are found left to right, dust ignored (" + parts.size() + ")",
+            parts.size() == 2 && parts.get(0).x < parts.get(1).x && parts.get(0).w == 8 && parts.get(1).w == 20);
+        float[] touch = new float[w * h];
+        for (int y = 10; y < 60; y++) for (int x = 10; x < 40; x++) touch[y * w + x] = 1f;
+        check("segment: one connected blob stays one digit", DigitPreprocess.segment(touch, w, h).size() == 1);
 
-        Sequential cnn = new Sequential().add(new Conv2D(2, 5, 5, 3, 3, 1, 1, r)).add(new BatchNorm2D(3, 5, 5)).add(new Activations.Tanh()).add(new Dense(75, 3, r));
-        check("gradcheck Conv2D + BatchNorm2D + Tanh + Dense", GradCheck.maxRelativeError(cnn, new Losses.MSE(), Tensor.randn(6, 50, 1, r), Tensor.randn(6, 3, 1, r)) < GC_TOL_DEEP);
+        float[] sh = DigitRecognizer.shift(px, 1, 0);
+        boolean moved = true;
+        for (int y = 0; y < 28; y++) for (int x = 1; x < 28; x++) if (sh[y * 28 + x] != px[y * 28 + x - 1]) moved = false;
+        check("recognizer: shift moves the picture one pixel right", moved);
 
-        Sequential res = new Sequential().add(new Conv2D(1, 6, 6, 2, 3, 1, 1, r))
-            .add(new Residual(new Conv2D(2, 6, 6, 2, 3, 1, 1, r), new BatchNorm2D(2, 6, 6), new Activations.Tanh(), new Conv2D(2, 6, 6, 2, 3, 1, 1, r), new BatchNorm2D(2, 6, 6)))
-            .add(new Activations.Tanh()).add(new Dense(72, 3, r));
-        check("gradcheck a ResNet-style block (convolutions + BatchNorm2D + skip connection)", GradCheck.maxRelativeError(res, new Losses.MSE(), Tensor.randn(5, 36, 1, r), Tensor.randn(5, 3, 1, r)) < GC_TOL_DEEP);
-
-        File txt = File.createTempFile("minidl-bn2d", ".txt"), bin = File.createTempFile("minidl-bn2d", ".bin");
-        res.fit(Tensor.randn(8, 36, 1, r), Tensor.randn(8, 3, 1, r), new Losses.MSE(), new Optimizers.Adam(0.01), 5, 4, 0, 0); // running averages become non-trivial
-        ModelIO.save(res, txt.getPath());
-        ModelIO.saveBinary(res, bin.getPath());
-        Tensor probe = Tensor.randn(4, 36, 1, r);
-        check("BatchNorm2D models save and load (text and binary, running averages included) with identical predictions",
-              maxDiff(res.predict(probe), ModelIO.loadModel(txt.getPath(), new Random(1)).predict(probe)) == 0.0 && maxDiff(res.predict(probe), ModelIO.loadModelBinary(bin.getPath(), new Random(1)).predict(probe)) == 0.0);
-        txt.delete(); bin.delete();
-        check("shape inference follows BatchNorm2D and catches a wrong size", res.shapes(1, 6, 6).size() == 4 && new BatchNorm2D(3, 4, 4).outputShape(new int[]{3, 4, 4}).length == 3);
-
-        // ---------------- LSTM
-        int T = 4, D = 3, H = 5, N = 3;
-        LSTM lstm = new LSTM(T, D, H, r);
-        for (Param p : lstm.params()) for (int i = 0; i < p.value.data.length; i++) p.value.data[i] += (float) (r.nextGaussian() * 0.3);
-        Tensor xs = Tensor.randn(N, T * D, 1, r);
-        Tensor got = lstm.forward(xs);
-        double[][] hPrev = new double[N][H], cPrev = new double[N][H];
-        double worst = 0;
-        Tensor Wx = lstm.params().get(0).value, Wh = lstm.params().get(1).value, b = lstm.params().get(2).value;
-        for (int t = 0; t < T; t++)
-            for (int n = 0; n < N; n++) {
-                double[] z = new double[4 * H];
-                for (int j = 0; j < 4 * H; j++) {
-                    double s = b.data[j];
-                    for (int d = 0; d < D; d++) s += xs.data[n * T * D + t * D + d] * Wx.data[d * 4 * H + j];
-                    for (int k = 0; k < H; k++) s += hPrev[n][k] * Wh.data[k * 4 * H + j];
-                    z[j] = s;
-                }
-                for (int k = 0; k < H; k++) {
-                    double i1 = 1 / (1 + Math.exp(-z[k])), f1 = 1 / (1 + Math.exp(-z[H + k])), g1 = Math.tanh(z[2 * H + k]), o1 = 1 / (1 + Math.exp(-z[3 * H + k]));
-                    double c = f1 * cPrev[n][k] + i1 * g1, h = o1 * Math.tanh(c);
-                    cPrev[n][k] = c; hPrev[n][k] = h;
-                    worst = Math.max(worst, Math.abs(got.data[n * T * H + t * H + k] - h));
-                }
-            }
-        check("LSTM matches a plain double-precision reference of the gate equations (worst " + String.format("%.1e", worst) + ")", worst < 1e-5);
-        check("LSTM forget gate starts with bias 1 (it begins by KEEPING its memory)", lstm.params().get(2).value.data[H] != 0f && new LSTM(T, D, H, new Random(1)).params().get(2).value.data[H] == 1f);
-
-        Sequential lm = new Sequential().add(new LSTM(4, 3, 5, r)).add(new TokenWise(4, 5, new Dense(5, 2, r))).add(new Reshape(2));
-        Tensor tin = Tensor.randn(3, 12, 1, r), tt = new Tensor(12, 2);
-        for (int i = 0; i < 12; i++) tt.data[i * 2 + r.nextInt(2)] = 1f;
-        check("gradcheck LSTM (backpropagation through time, 4 steps) + Dense head", GradCheck.maxRelativeError(lm, new Losses.SoftmaxCrossEntropy(), tin, tt) < GC_TOL_DEEP);
-
-        Tensor a = tin.copy(), a2 = tin.copy();
-        for (int d = 0; d < 3; d++) a2.data[3 * 3 + d] += 1f; // change only the LAST step of sequence 0
-        Tensor ya = lm.predict(a), yb = lm.predict(a2);
-        double early = 0, late = 0;
-        for (int t = 0; t < 3; t++) for (int v = 0; v < 2; v++) early = Math.max(early, Math.abs(ya.data[t * 2 + v] - yb.data[t * 2 + v]));
-        for (int v = 0; v < 2; v++) late = Math.max(late, Math.abs(ya.data[3 * 2 + v] - yb.data[3 * 2 + v]));
-        check("LSTM reads left to right: changing the last step cannot change earlier outputs (" + String.format("%.0e", early) + ") but changes the last one (" + String.format("%.3f", late) + ")", early < 1e-7 && late > 1e-4);
-
-        // learns something that needs MEMORY: at every step, name the token that came ONE step earlier
-        Random rr = new Random(9);
-        int V = 5, TT = 6, NN = 96;
-        Tensor ids = new Tensor(NN, TT), tgt = new Tensor(NN * TT, V);
-        for (int n = 0; n < NN; n++) for (int t = 0; t < TT; t++) {
-            ids.data[n * TT + t] = rr.nextInt(V);
-            int prev = t == 0 ? 0 : (int) ids.data[n * TT + t - 1];
-            tgt.data[(n * TT + t) * V + prev] = 1f;
-        }
-        Sequential mem = new Sequential().add(new Embedding(V, 8, TT, rr)).add(new LSTM(TT, 8, 16, rr)).add(new TokenWise(TT, 16, new Dense(16, V, rr))).add(new Reshape(V));
-        new Trainer().epochs(120).batchSize(32).seed(0).fit(mem, new TensorSource(ids, tgt, TT), new Losses.SoftmaxCrossEntropy(), new Optimizers.Adam(0.02));
-        double loss = new Losses.SoftmaxCrossEntropy().forward(mem.predict(ids), tgt);
-        check("an LSTM learns to recall the previous token (loss " + String.format("%.3f", loss) + ", random guessing is " + String.format("%.3f", Math.log(V)) + ")", loss < 0.15);
-
-        File f = File.createTempFile("minidl-lstm", ".bin"), f2 = File.createTempFile("minidl-lstm", ".txt");
-        ModelIO.saveBinary(mem, f.getPath());
-        ModelIO.save(mem, f2.getPath());
-        check("LSTM models save and load (text and binary) with identical predictions",
-              maxDiff(mem.predict(ids), ModelIO.loadModelBinary(f.getPath(), new Random(1)).predict(ids)) == 0.0 && maxDiff(mem.predict(ids), ModelIO.loadModel(f2.getPath(), new Random(1)).predict(ids)) == 0.0);
-        f.delete(); f2.delete();
-        check("shape inference follows an LSTM: ids [6] -> embedding [6,8] -> LSTM [6,16] -> head [6,5]",
-              java.util.Arrays.equals(mem.shapes(6).get(1), new int[]{6, 16}) && java.util.Arrays.equals(mem.shapes(6).get(3), new int[]{6, 5}));
+        Random rnd = new Random(3);
+        Sequential m = new Sequential().add(new Dense(784, 16, rnd)).add(new Activations.ReLU()).add(new Dense(16, 10, rnd));
+        DigitRecognizer rec = new DigitRecognizer(m);
+        DigitRecognizer.Result before = rec.predict(px, false);
+        double sum = 0; for (double p : before.probs) sum += p;
+        check("recognizer: probabilities add up to 1 (with and without test-time augmentation)",
+            Math.abs(sum - 1) < 1e-6 && Math.abs(java.util.Arrays.stream(rec.predict(px, true).probs).sum() - 1) < 1e-6);
+        int target = (before.label + 3) % 10;
+        for (int i = 0; i < 6; i++) rec.learn(px, target);
+        DigitRecognizer.Result after = rec.predict(px, false);
+        check("learn: after 6 corrections the model says " + target + " (p " + String.format("%.2f", before.probs[target]) + " -> " + String.format("%.2f", after.probs[target]) + ")",
+            after.label == target && after.probs[target] > before.probs[target] && rec.learnedCount() == 6);
+        rec.reset();
+        DigitRecognizer.Result back = rec.predict(px, false);
+        check("reset: the original answers come back exactly", back.label == before.label && Math.abs(back.probs[target] - before.probs[target]) < 1e-9 && rec.learnedCount() == 0);
+        boolean bad = false;
+        try { rec.learn(px, 10); } catch (IllegalArgumentException e) { bad = true; }
+        check("learn: a label outside 0..9 gives a clear error", bad);
     }
 
-    // ------------------------------------------------------------------ round 5: checkpoints and resumable schedules
+    static void letters() throws Exception {
+        File img = File.createTempFile("emn-img", ".idx"), lab = File.createTempFile("emn-lab", ".idx");
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(img))) {
+            o.writeInt(2051); o.writeInt(2); o.writeInt(28); o.writeInt(28);
+            byte[] a = new byte[784], b = new byte[784];
+            a[5 * 28 + 2] = (byte) 200;   // stored sideways: row 5, column 2
+            b[0] = 1;
+            o.write(a); o.write(b);
+        }
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(lab))) { o.writeInt(2049); o.writeInt(2); o.write(new byte[]{1, 26}); }
+        ByteSource src = EmnistLoader.letters(img.getPath(), lab.getPath(), 10);
+        Tensor x = src.features(new int[]{0, 1}, 0, 2), y = src.targets(new int[]{0, 1}, 0, 2);
+        check("EMNIST: pictures are turned back (stored row 5, col 2 -> row 2, col 5)", Math.abs(x.get(0, 2 * 28 + 5) - 200 / 255.0) < 1e-6 && x.get(0, 5 * 28 + 2) == 0);
+        check("EMNIST: labels 1..26 become classes 0..25 (A = 0, Z = 25), 26 columns", y.cols == 26 && y.get(0, 0) == 1 && y.get(1, 25) == 1);
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(lab))) { o.writeInt(2049); o.writeInt(2); o.write(new byte[]{0, 5}); }
+        String msg = "";
+        try { EmnistLoader.letters(img.getPath(), lab.getPath(), 10); } catch (IOException e) { msg = e.getMessage(); }
+        check("EMNIST: a label 0 (not a letter) gives a clear error", msg.contains("outside"));
+        img.delete(); lab.delete();
 
-    static void checkpointing() throws Exception {
-        Random r = new Random(151);
-        Tensor x = Tensor.randn(40, 4, 1, r), y = Tensor.randn(40, 2, 1, r);
-        Sequential m = new Sequential().add(new Dense(4, 8, r)).add(new BatchNorm(8)).add(new Activations.ReLU()).add(new Dense(8, 2, r));
-        File f = File.createTempFile("minidl-ckpt", ".bin");
-        new Trainer().epochs(3).batchSize(10).checkpoint(f.getPath()).fit(m, x, y, new Losses.MSE(), new Optimizers.Adam(0.01));
-        Sequential back = ModelIO.loadModelBinary(f.getPath(), new Random(1));
-        check("Trainer.checkpoint saves the model after every epoch; loading it gives the same predictions (BatchNorm averages included)",
-              f.length() > 0 && maxDiff(m.predict(x), back.predict(x)) == 0.0);
-        f.delete();
+        int w = 100, h = 60;
+        float[] ink = new float[w * h];
+        for (int yy = 10; yy < 50; yy++) for (int xx = 40; xx < 50; xx++) ink[yy * w + xx] = 1f; // a tall bar
+        float[] mn = DigitPreprocess.toMnist(ink, w, h), em = DigitPreprocess.whole(ink, w, h, DigitPreprocess.Style.EMNIST).pixels;
+        int rowsMn = 0, rowsEm = 0;
+        for (int r = 0; r < 28; r++) { boolean a = false, b = false; for (int c = 0; c < 28; c++) { a |= mn[r * 28 + c] > 0.1f; b |= em[r * 28 + c] > 0.1f; } if (a) rowsMn++; if (b) rowsEm++; }
+        check("EMNIST style fills a 24 px box, MNIST style 20 px (" + rowsEm + " vs " + rowsMn + " rows)", rowsEm == 24 && rowsMn == 20);
 
-        final java.util.List<Double> rates = new java.util.ArrayList<>();
-        Optimizer spy = new Optimizer() {
-            double lr;
-            public void step(java.util.List<Param> ps) { if (rates.isEmpty() || rates.get(rates.size() - 1) != lr) rates.add(lr); }
-            public void setLearningRate(double v) { lr = v; }
-            public double getLearningRate() { return lr; }
+        Random rnd = new Random(4);
+        Sequential m = new Sequential().add(new Dense(784, 12, rnd)).add(new Activations.ReLU()).add(new Dense(12, 26, rnd));
+        DigitRecognizer rec = new DigitRecognizer(m);
+        check("recognizer: a 26-output model is a letters model (A-Z, EMNIST preprocessing)", rec.classes == 26 && rec.alphabet.equals("ABCDEFGHIJKLMNOPQRSTUVWXYZ") && rec.style() == DigitPreprocess.Style.EMNIST);
+        for (int i = 0; i < 8; i++) rec.learn(em, 17); // R
+        check("letters: after 8 corrections the model says R", rec.predict(em, false).label == 17);
+        boolean bad = false;
+        try { rec.learn(em, 26); } catch (IllegalArgumentException e) { bad = true; }
+        check("letters: class 26 gives a clear error", bad);
+    }
+
+    /** A damaged or hostile model file must give an IOException with a clear message, never a crash. */
+    static void hostileFiles() throws Exception {
+        String[][] cases = {
+            {"huge layer", "Dense 2000000000 2000000000"},
+            {"not a number", "Dense abc 4"},
+            {"missing size", "Dense 4"},
+            {"negative size", "Dense -5 4"},
+            {"unknown layer", "Teleport 3"},
         };
-        Schedule cos = Schedule.cosine(0.1, 0.001);
-        Sequential tiny = new Sequential().add(new Dense(4, 2, r));
-        new Trainer().epochs(2).batchSize(40).schedule(cos).continueSchedule(2, 6).fit(tiny, x, y, new Losses.MSE(), spy);
-        check("continueSchedule(2, 6): the 2 epochs run use the learning rates of epochs 3 and 4 of a 6-epoch cosine (" + String.format("%.4f, %.4f", rates.get(0), rates.get(1)) + ")",
-              rates.size() == 2 && Math.abs(rates.get(0) - cos.rate(2, 6)) < 1e-12 && Math.abs(rates.get(1) - cos.rate(3, 6)) < 1e-12);
+        for (String[] c : cases) {
+            File f = File.createTempFile("hostile", ".bin");
+            try (DataOutputStream o = new DataOutputStream(new FileOutputStream(f))) { o.writeInt(0x4D444C33); o.writeInt(1); o.writeUTF(c[1]); }
+            String got = "no exception";
+            try { ModelIO.loadModelBinary(f.getPath(), new Random(1)); } catch (IOException e) { got = "IOException"; } catch (Throwable t) { got = t.getClass().getSimpleName(); }
+            check("damaged file (" + c[0] + ") gives a clear IOException, got " + got, got.equals("IOException"));
+            f.delete();
+        }
+        File f = File.createTempFile("hostile", ".bin");
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(f))) { o.writeInt(0x4D444C33); o.writeInt(2000000000); }
+        String got = "no exception";
+        try { ModelIO.loadModelBinary(f.getPath(), new Random(1)); } catch (IOException e) { got = "IOException"; } catch (Throwable t) { got = t.getClass().getSimpleName(); }
+        check("damaged file (2 billion layers) gives a clear IOException, got " + got, got.equals("IOException"));
+        f.delete();
+    }
+
+    static void alnum() {
+        byte[] dpx = new byte[2 * 784], lpx = new byte[2 * 784];
+        for (int y = 4; y < 24; y++) for (int x = 12; x < 16; x++) { dpx[y * 28 + x] = (byte) 255; dpx[784 + y * 28 + x] = (byte) 255; } // two small "1" bars, 20 px tall
+        lpx[0] = 1; lpx[784] = 1;
+        ByteSource digits = new ByteSource(dpx, 784, new byte[]{3, 7}, 10), letters = new ByteSource(lpx, 784, new byte[]{0, 25}, 26);
+        ByteSource both = Alnum.combine(digits, letters);
+        int[] idx = {0, 1, 2, 3};
+        Tensor y = both.targets(idx, 0, 4), x = both.features(idx, 0, 4);
+        boolean[] seen = new boolean[36];
+        for (int i = 0; i < 4; i++) for (int c = 0; c < 36; c++) if (y.get(i, c) == 1) seen[c] = true;
+        check("alnum: 4 pictures, 36 columns, classes 3 and 7 (digits), 10 (A) and 35 (Z) all present",
+            both.size() == 4 && y.cols == 36 && seen[3] && seen[7] && seen[10] && seen[35]);
+        int tall = 0;
+        for (int i = 0; i < 4; i++) { if (y.get(i, 3) + y.get(i, 7) != 1) continue; int rows = 0; for (int r = 0; r < 28; r++) { boolean a = false; for (int c = 0; c < 28; c++) a |= x.get(i, r * 28 + c) > 0.1; if (a) rows++; } if (rows == 24) tall++; }
+        check("alnum: the digits are re-made in the 24 px EMNIST style (20 px bars became 24 px)", tall == 2);
+        Random rnd = new Random(2);
+        DigitRecognizer rec = new DigitRecognizer(new Sequential().add(new Dense(784, 8, rnd)).add(new Activations.ReLU()).add(new Dense(8, 36, rnd)));
+        check("recognizer: a 36-output model reads 0-9 then A-Z with EMNIST preprocessing", rec.alphabet.equals("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") && rec.style() == DigitPreprocess.Style.EMNIST);
     }
 }

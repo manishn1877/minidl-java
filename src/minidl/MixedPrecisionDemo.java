@@ -6,7 +6,7 @@ import java.util.Random;
 
 /**
  * 16-bit (mixed precision) training on real MNIST digits.
- *   java -Xmx256m -cp out minidl.MixedPrecisionDemo <mnist-folder> [epochs=2]
+ *   java -Xmx256m -cp out minidl.MixedPrecisionDemo &lt;mnist-folder&gt; [epochs=2]
  *
  * Part 1: how much of the gradient survives in each format (one batch).
  * Part 2: train the same network from scratch in FP32, BF16, FP16 without loss scaling, FP16 with dynamic loss scaling.

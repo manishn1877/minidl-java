@@ -3,10 +3,20 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: ['17', '21']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-      - run: ./run.sh
+          java-version: ${{ matrix.java }}
+      - run: ./run.sh            # compile + the full test suite
+      - run: ./build-jar.sh      # jar, sources jar, javadoc jar (fails on any javadoc error)
+      - run: java -jar dist/minidl-1.0.0.jar version
+      - uses: actions/upload-artifact@v4
+        if: matrix.java == '17'
+        with:
+          name: minidl-jars
+          path: dist/*.jar

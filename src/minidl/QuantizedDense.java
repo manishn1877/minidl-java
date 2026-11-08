@@ -42,19 +42,23 @@ public class QuantizedDense implements Layer {
 
     @Override public Tensor forward(Tensor x) {
         if (x.cols != in) throw new IllegalArgumentException("QuantizedDense expects " + in + " columns, got " + x.cols);
-        // Turn the int8 weights back into floats ONCE per call (a temporary copy of this one layer, reused by the next call),
-        // then use the same fast multiply as the float layers. The stored weights stay 1 byte each.
-        float[] wf = Tensor.scratchB(in * out);
-        for (int k = 0; k < in; k++) {
-            int base = k * out;
-            for (int j = 0; j < out; j++) wf[base + j] = w[base + j] * scale[j];
-        }
         Tensor y = new Tensor(x.rows, out);
-        Tensor.matmulRaw(x.data, 0, x.rows, in, wf, 0, out, y.data, 0);
-        for (int i = 0; i < x.rows; i++) {
-            int base = i * out;
-            for (int j = 0; j < out; j++) y.data[base + j] += bias[j];
-        }
+        final float[] xd = x.data, yd = y.data;
+        Tensor.forRows(x.rows, (long) x.rows * in * out, i -> {
+            int xi = i * in, ci = i * out;
+            int k = 0;
+            for (; k + 3 < in; k += 4) {
+                float x0 = xd[xi + k], x1 = xd[xi + k + 1], x2 = xd[xi + k + 2], x3 = xd[xi + k + 3];
+                int o0 = k * out, o1 = o0 + out, o2 = o1 + out, o3 = o2 + out;
+                for (int j = 0; j < out; j++) yd[ci + j] += x0 * w[o0 + j] + x1 * w[o1 + j] + x2 * w[o2 + j] + x3 * w[o3 + j];
+            }
+            for (; k < in; k++) {
+                float xv = xd[xi + k];
+                int ok = k * out;
+                for (int j = 0; j < out; j++) yd[ci + j] += xv * w[ok + j];
+            }
+            for (int j = 0; j < out; j++) yd[ci + j] = yd[ci + j] * scale[j] + bias[j];
+        });
         return y;
     }
 

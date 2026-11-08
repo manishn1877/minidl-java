@@ -22,8 +22,6 @@ public class Trainer {
     private double clipNorm = 0;
     private boolean restoreBest = true;
     private Schedule schedule = null;
-    private int epochOffset = 0, scheduleTotal = 0;
-    private String checkpointPath = null;
     private DataSource val;
 
     public Trainer epochs(int e) { this.epochs = e; return this; }
@@ -34,16 +32,6 @@ public class Trainer {
     public Trainer printEvery(int p) { this.printEvery = p; return this; }
     public Trainer schedule(Schedule s) { this.schedule = s; return this; }
     public Trainer clipNorm(double c) { this.clipNorm = c; return this; }
-    /**
-     * Save the model (binary file) after every epoch, so a run that is interrupted can be continued or evaluated.
-     * Only the weights are saved, not the optimizer's memory (Adam's running averages start fresh when you continue).
-     */
-    public Trainer checkpoint(String path) { this.checkpointPath = path; return this; }
-    /**
-     * Continue a longer training in pieces: this call runs `epochs` epochs, but the learning-rate schedule behaves as if it is
-     * at epoch `startEpoch` of `totalEpochs` (so the cosine curve carries on instead of starting over).
-     */
-    public Trainer continueSchedule(int startEpoch, int totalEpochs) { this.epochOffset = startEpoch; this.scheduleTotal = totalEpochs; return this; }
     /** Stop if validation loss has not improved for this many epochs. 0 = never stop early. */
     public Trainer patience(int p) { this.patience = p; return this; }
     public Trainer restoreBest(boolean r) { this.restoreBest = r; return this; }
@@ -74,7 +62,7 @@ public class Trainer {
         int sinceBest = 0;
 
         for (int e = 1; e <= epochs; e++) {
-            if (schedule != null) opt.setLearningRate(schedule.rate(e - 1 + epochOffset, scheduleTotal > 0 ? scheduleTotal : epochs));
+            if (schedule != null) opt.setLearningRate(schedule.rate(e - 1, epochs));
 
             for (int i = n - 1; i > 0; i--) { // shuffle
                 int j = rnd.nextInt(i + 1);
@@ -100,11 +88,6 @@ public class Trainer {
                     best = model.snapshot();
                     sinceBest = 0;
                 } else sinceBest++;
-            }
-
-            if (checkpointPath != null) {
-                try { ModelIO.saveBinary(model, checkpointPath); }
-                catch (java.io.IOException ex) { throw new java.io.UncheckedIOException("could not write checkpoint " + checkpointPath, ex); }
             }
 
             if (printEvery > 0 && (e % printEvery == 0 || e == 1)) {

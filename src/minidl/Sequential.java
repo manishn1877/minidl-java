@@ -6,7 +6,6 @@ import java.util.List;
 
 /** A model = layers in a row. Data flows forward, blame flows backward. */
 public class Sequential {
-    private static final int EVAL_CHUNK = 256; // rows per prediction chunk: small enough for convolution networks in little memory
     private final List<Layer> layers = new ArrayList<>();
 
     // ---- mixed-precision training (see setPrecision)
@@ -166,29 +165,29 @@ public class Sequential {
         return 100.0 * ok / x.rows;
     }
 
-    /** Average loss over a whole DataSource, 256 rows at a time (so big data never has to fit in memory as tensors). */
+    /** Average loss over a whole DataSource, 1024 rows at a time (so big data never has to fit in memory as tensors). */
     public double evalLoss(DataSource src, Loss loss) {
         setTraining(false);
         int n = src.size();
         int[] idx = new int[n];
         for (int i = 0; i < n; i++) idx[i] = i;
         double total = 0;
-        for (int s = 0; s < n; s += EVAL_CHUNK) {
-            int e = Math.min(s + EVAL_CHUNK, n);
+        for (int s = 0; s < n; s += 1024) {
+            int e = Math.min(s + 1024, n);
             total += loss.forward(forward(src.features(idx, s, e)), src.targets(idx, s, e)) * (e - s);
         }
         return total / n;
     }
 
-    /** % correct over a whole DataSource, 256 rows at a time. */
+    /** % correct over a whole DataSource, 1024 rows at a time. */
     public double accuracy(DataSource src) {
         setTraining(false);
         int n = src.size();
         int[] idx = new int[n];
         for (int i = 0; i < n; i++) idx[i] = i;
         int ok = 0;
-        for (int s = 0; s < n; s += EVAL_CHUNK) {
-            int e = Math.min(s + EVAL_CHUNK, n);
+        for (int s = 0; s < n; s += 1024) {
+            int e = Math.min(s + 1024, n);
             Tensor out = forward(src.features(idx, s, e)), truth = src.targets(idx, s, e);
             for (int i = 0; i < e - s; i++) if (out.argmaxRow(i) == truth.argmaxRow(i)) ok++;
         }

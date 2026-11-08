@@ -28,11 +28,17 @@ public class BF16Dense implements Layer {
 
     @Override public Tensor forward(Tensor x) {
         if (x.cols != in) throw new IllegalArgumentException("BF16Dense expects " + in + " columns, got " + x.cols);
-        float[] wf = Tensor.scratchB(in * out);       // one dequantized copy of this layer, reused
-        for (int i = 0; i < in * out; i++) wf[i] = Float.intBitsToFloat(((int) w[i]) << 16);
         Tensor y = new Tensor(x.rows, out);
-        Tensor.matmulRaw(x.data, 0, x.rows, in, wf, 0, out, y.data, 0);
-        for (int i = 0; i < x.rows; i++) for (int j = 0; j < out; j++) y.data[i * out + j] += bias[j];
+        final float[] xd = x.data, yd = y.data;
+        Tensor.forRows(x.rows, (long) x.rows * in * out, i -> {
+            int xi = i * in, ci = i * out;
+            for (int k = 0; k < in; k++) {
+                float xv = xd[xi + k];
+                int ok = k * out;
+                for (int j = 0; j < out; j++) yd[ci + j] += xv * Float.intBitsToFloat(((int) w[ok + j]) << 16);
+            }
+            for (int j = 0; j < out; j++) yd[ci + j] += bias[j];
+        });
         return y;
     }
 

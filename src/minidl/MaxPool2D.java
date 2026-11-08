@@ -31,25 +31,6 @@ public class MaxPool2D implements Layer {
         int n = x.rows;
         Tensor out = new Tensor(n, outSize);
         if (winner.length < n * outSize) winner = new byte[n * outSize];
-        if (k == 2) { // the common case, without inner loops
-            final float[] xd = x.data;
-            for (int i = 0; i < n; i++)
-                for (int c = 0; c < C; c++)
-                    for (int oy = 0; oy < outH; oy++) {
-                        int row0 = i * inSize + (c * H + 2 * oy) * W, row1 = row0 + W;
-                        int o = i * outSize + (c * outH + oy) * outW;
-                        for (int ox = 0; ox < outW; ox++) {
-                            int p = row0 + 2 * ox, q = row1 + 2 * ox;
-                            float best = xd[p]; int bi = 0;
-                            float v = xd[p + 1]; if (v > best) { best = v; bi = 1; }
-                            v = xd[q]; if (v > best) { best = v; bi = 2; }
-                            v = xd[q + 1]; if (v > best) { best = v; bi = 3; }
-                            out.data[o + ox] = best;
-                            winner[o + ox] = (byte) bi;
-                        }
-                    }
-            return out;
-        }
         for (int i = 0; i < n; i++)
             for (int c = 0; c < C; c++)
                 for (int oy = 0; oy < outH; oy++)
@@ -72,19 +53,6 @@ public class MaxPool2D implements Layer {
     @Override public Tensor backward(Tensor g) {
         int n = g.rows;
         Tensor dx = new Tensor(n, inSize);
-        if (k == 2) {
-            for (int i = 0; i < n; i++)
-                for (int c = 0; c < C; c++)
-                    for (int oy = 0; oy < outH; oy++) {
-                        int row0 = i * inSize + (c * H + 2 * oy) * W;
-                        int o = i * outSize + (c * outH + oy) * outW;
-                        for (int ox = 0; ox < outW; ox++) {
-                            int bi = winner[o + ox];
-                            dx.data[row0 + 2 * ox + (bi >> 1) * W + (bi & 1)] += g.data[o + ox];
-                        }
-                    }
-            return dx;
-        }
         for (int i = 0; i < n; i++)
             for (int c = 0; c < C; c++)
                 for (int oy = 0; oy < outH; oy++)

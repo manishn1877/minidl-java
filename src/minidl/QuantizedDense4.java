@@ -46,18 +46,28 @@ public class QuantizedDense4 implements Layer {
 
     @Override public Tensor forward(Tensor x) {
         if (x.cols != in) throw new IllegalArgumentException("QuantizedDense4 expects " + in + " columns, got " + x.cols);
-        float[] wf = Tensor.scratchB(in * out);       // one dequantized copy of this layer, reused
-        for (int k = 0; k < in; k++) {
-            int sb = (k / group) * outPad, base = k * half;
-            for (int j = 0; j < out; j++) {
-                int bt = packed[base + (j >> 1)];
-                int nib = (j & 1) == 0 ? (bt & 0xF) : ((bt >> 4) & 0xF);
-                wf[k * out + j] = (nib - 8) * scale[sb + j];
-            }
-        }
         Tensor y = new Tensor(x.rows, out);
-        Tensor.matmulRaw(x.data, 0, x.rows, in, wf, 0, out, y.data, 0);
-        for (int i = 0; i < x.rows; i++) for (int j = 0; j < out; j++) y.data[i * out + j] += bias[j];
+        final float[] xd = x.data, yd = y.data;
+        Tensor.forRows(x.rows, (long) x.rows * in * out, i -> {
+            float[] tmp = new float[outPad], acc = new float[outPad];
+            int xi = i * in;
+            for (int g = 0; g < groups; g++) {
+                java.util.Arrays.fill(tmp, 0f);
+                int kEnd = Math.min(in, (g + 1) * group);
+                for (int k = g * group; k < kEnd; k++) {
+                    float xv = xd[xi + k];
+                    int base = k * half;
+                    for (int jj = 0; jj < half; jj++) {
+                        int bt = packed[base + jj];
+                        tmp[2 * jj] += xv * ((bt & 0xF) - 8);
+                        tmp[2 * jj + 1] += xv * (((bt >> 4) & 0xF) - 8);
+                    }
+                }
+                int sb = g * outPad;
+                for (int j = 0; j < outPad; j++) acc[j] += tmp[j] * scale[sb + j];
+            }
+            for (int j = 0; j < out; j++) yd[i * out + j] = acc[j] + bias[j];
+        });
         return y;
     }
 

@@ -42,16 +42,19 @@ public class QuantizedConv2D implements Layer {
     @Override public Tensor forward(Tensor x) {
         if (x.cols != inSize) throw new IllegalArgumentException("QuantizedConv2D expects " + inSize + " numbers per image, got " + x.cols);
         Tensor out = new Tensor(x.rows, outSize);
-        final float[] wf = new float[outC * K];        // the filters as floats (the int8 scale folded in), for this call only
-        for (int c = 0; c < outC; c++) for (int kk = 0; kk < K; kk++) wf[c * K + kk] = w[c * K + kk] * scale[c];
         Tensor.forRows(x.rows, (long) x.rows * outC * P * K, i -> {
             float[] col = new float[K * P];
             Conv2D.im2col(x.data, i * inSize, col, 0, inC, inH, inW, k, stride, pad, 1, outH, outW);
-            Tensor.gemmNN(wf, 0, K, col, 0, P, out.data, i * outSize, 0, outC);   // the same fast multiply as the float convolution
             for (int c = 0; c < outC; c++) {
-                int ob = i * outSize + c * P;
-                float bc = bias[c];
-                for (int p = 0; p < P; p++) out.data[ob + p] += bc;
+                int ob = i * outSize + c * P, wb = c * K;
+                for (int kk = 0; kk < K; kk++) {
+                    float wv = w[wb + kk];            // whole number -127..127
+                    if (wv == 0f) continue;
+                    int cb = kk * P;
+                    for (int p = 0; p < P; p++) out.data[ob + p] += wv * col[cb + p];
+                }
+                float sc = scale[c], bc = bias[c];
+                for (int p = 0; p < P; p++) out.data[ob + p] = out.data[ob + p] * sc + bc;
             }
         });
         return out;

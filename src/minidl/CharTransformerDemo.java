@@ -7,7 +7,7 @@ import java.util.Random;
 /**
  * A tiny GPT-style language model, built from the library's own layers, that learns to write
  * text one character at a time.
- *   java -Xmx512m -cp out minidl.CharTransformerDemo  <text file>  [steps=1500]
+ *   java -Xmx512m -cp out minidl.CharTransformerDemo  &lt;text file&gt;  [steps=1500]
  * Try it with the Tiny Shakespeare file (about 1.1 MB of plays).
  */
 public class CharTransformerDemo {

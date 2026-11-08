@@ -35,7 +35,8 @@ public final class ModelIO {
             expect(r.readLine(), "MINIDL 2");
             int n = countLine(r.readLine(), "layers");
             Sequential m = new Sequential();
-            for (int i = 0; i < n; i++) m.add(build(r.readLine(), rnd));
+            if (n < 0 || n > MAX_LAYERS) throw new IOException("corrupt model file: " + n + " layers");
+            for (int i = 0; i < n; i++) m.add(buildSafe(r.readLine(), rnd));
             readWeights(m, r);
             return m;
         }
@@ -81,6 +82,19 @@ public final class ModelIO {
     /** Teach loadModel about your own layer type. The name is the first word of the layer's spec(). */
     public static void register(String name, LayerFactory factory) { REGISTRY.put(name, factory); }
 
+    private static final int MAX_LAYERS = 100_000, MAX_DIM = 1 << 27;
+
+    /**
+     * build() for files we do not trust: a damaged or hostile file must give a clear IOException,
+     * never an ArrayIndexOutOfBounds, NumberFormatException or an out-of-memory crash from a huge layer size.
+     */
+    private static Layer buildSafe(String spec, Random rnd) throws IOException {
+        if (spec == null) throw new IOException("corrupt model file: it ends before the last layer");
+        try { return build(spec, rnd); }
+        catch (IOException e) { throw e; }
+        catch (RuntimeException | OutOfMemoryError e) { throw new IOException("corrupt or unsupported layer description '" + spec + "' (" + e.getClass().getSimpleName() + ")", e); }
+    }
+
     private static Layer build(String spec, Random rnd) throws IOException {
         spec = spec.trim();
         int br = spec.indexOf('[');
@@ -106,8 +120,6 @@ public final class ModelIO {
             case "Dropout":    return new Dropout(Double.parseDouble(t[1]), rnd);
             case "BatchNorm":  return new BatchNorm(i(t[1]), Double.parseDouble(t[2]));
             case "LayerNorm":  return new LayerNorm(i(t[1]));
-            case "BatchNorm2D": return new BatchNorm2D(i(t[1]), i(t[2]), i(t[3]), Double.parseDouble(t[4]));
-            case "LSTM":       return new LSTM(i(t[1]), i(t[2]), i(t[3]), rnd);
             case "Conv2D":     return t.length > 8 ? new Conv2D(i(t[1]), i(t[2]), i(t[3]), i(t[4]), i(t[5]), i(t[6]), i(t[7]), i(t[8]), i(t[9]), rnd)
                                            : new Conv2D(i(t[1]), i(t[2]), i(t[3]), i(t[4]), i(t[5]), i(t[6]), i(t[7]), rnd);
             case "MaxPool2D":  return new MaxPool2D(i(t[1]), i(t[2]), i(t[3]), i(t[4]));
@@ -144,7 +156,11 @@ public final class ModelIO {
         return parts;
     }
 
-    private static int i(String s) { return Integer.parseInt(s); }
+    private static int i(String s) {
+        int v = Integer.parseInt(s);
+        if (v < 0 || v > MAX_DIM) throw new IllegalArgumentException("size " + v + " is out of range");
+        return v;
+    }
 
     // ------------------------------------------------------------------ binary format (much smaller, much faster)
 
@@ -172,7 +188,8 @@ public final class ModelIO {
             if (in.readInt() != MAGIC) throw new IOException("not a MiniDL binary model file");
             int n = in.readInt();
             Sequential m = new Sequential();
-            for (int k = 0; k < n; k++) m.add(build(in.readUTF(), rnd));
+            if (n < 0 || n > MAX_LAYERS) throw new IOException("corrupt model file: " + n + " layers");
+            for (int k = 0; k < n; k++) m.add(buildSafe(in.readUTF(), rnd));
             List<Param> ps = m.params();
             if (in.readInt() != ps.size()) throw new IOException("parameter count mismatch");
             for (Param p : ps) readBin(in, p.value);

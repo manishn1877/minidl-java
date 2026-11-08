@@ -10,12 +10,9 @@ Tensors, backpropagation, automatic differentiation, optimizers, layers (dense, 
 - **Autograd**: a second, automatic way to get gradients. A whole transformer built only from autograd layers gives the same loss and gradients as the hand-written one (gradients agree to 8e-7), at about 2x the time and 3x the memory.
 - **Optional SIMD kernels** (Java's Vector API): matrix multiply 7 to 28x faster than the portable loops, whole training epochs 2 to 4x faster. The CNN above now trains at 12.3 s per epoch instead of 25.7.
 - **16-bit mixed-precision training** with loss scaling (FP16 and bfloat16): activations stored in 16 bits cut the memory held for backprop by 2.5x (plain network) to 5.2x (CNN).
-- **CIFAR-10 colour photos**: a plain 156,074-weight CNN reaches **70.64%** on the 10,000 unseen test photos, and a ResNet-style model (BatchNorm2D + residual blocks) with only **33,642 weights reaches 72.37%** (random guessing is 10%).
-- **An LSTM** (recurrent layer, backpropagation through time) next to the transformer on the same text task: 2.79 vs 2.63 bits per character after 1,500 steps, at 0.06 vs 0.11 s per step.
-- **Shrunk models (int8, int4, bfloat16) now run at about the speed of float32** (int8 1.01x on a large network), at 4x to 6x less weight memory.
-- **Resumable training**: checkpoints after every epoch and a learning-rate schedule that carries on across pieces.
+- **CIFAR-10 colour photos**: a 156,074-weight CNN reaches **70.64%** on the 10,000 unseen test photos (random guessing is 10%).
 - Dilated and grouped (depthwise) convolution, N-dimensional tensors with broadcasting, and shape inference that catches wrong layer sizes before training.
-- 186 automated tests, run twice (portable kernels and Vector API kernels), including numerical gradient checks for every layer type, attention and LSTM compared with plain double-precision versions, a proof that the transformer cannot peek at future characters, and exhaustive checks of the 16-bit number formats.
+- 171 automated tests, run twice (portable kernels and Vector API kernels), including numerical gradient checks for every layer type, attention compared with a plain double-precision version, a proof that the transformer cannot peek at future characters, and exhaustive checks of the 16-bit number formats.
 
 > Why this exists: anyone can call `model.fit()`. This project shows you know **what happens inside** `fit()`.
 
@@ -27,7 +24,7 @@ Tensors, backpropagation, automatic differentiation, optimizers, layers (dense, 
 2. [Quick start](#2-quick-start)
 3. [The big idea in plain words](#3-the-big-idea-in-plain-words)
 4. [Project map](#4-project-map)
-5. [Step by step, with real examples](#5-step-by-step-with-real-examples) (Steps 1 to 35)
+5. [Step by step, with real examples](#5-step-by-step-with-real-examples) (Steps 1 to 32)
 6. [Efficiency: less memory, more speed](#6-efficiency-less-memory-more-speed)
 7. [Full real-life walkthrough: delivery time predictor](#7-full-real-life-walkthrough-delivery-time-predictor)
 8. [The other demos (including real MNIST)](#8-the-other-demos-including-real-mnist)
@@ -55,7 +52,7 @@ So nobody should call this "the first". What makes *this* project worth showing:
 | Many small repos | MiniDL |
 |---|---|
 | One network, XOR demo | A reusable library: layers, losses, optimizers, schedules, trainer |
-| "Trust me, backprop works" | **Gradient checks** prove it, and 186 tests guard it |
+| "Trust me, backprop works" | **Gradient checks** prove it, and 171 tests guard it |
 | Toy data only | **99.19% on real MNIST** with a convolutional network (held-out test set), plus a transformer that writes text |
 | Slow and memory hungry, and says so | Measured speed **and memory** work with a benchmark you can re-run (section 6): float32, byte-sized data, int8 models |
 | Code only | A README that explains every step with numbers you can check by hand |
@@ -73,7 +70,7 @@ The honest pitch: *"I built a small deep learning library to understand how trai
 You need a JDK (Java 17 or newer) with `javac`.
 
 ```bash
-./run.sh                 # compile + 186 tests (twice) + demos (about 15 seconds)
+./run.sh                 # compile + 171 tests (twice) + demos (about 13 seconds)
 ```
 
 Or by hand:
@@ -81,7 +78,7 @@ Or by hand:
 ```bash
 mkdir out
 javac -d out src/minidl/*.java
-java -cp out minidl.Tests       # 186 tests
+java -cp out minidl.Tests       # 171 tests
 java -cp out minidl.Main        # demos 1-4
 java -cp out minidl.Benchmark   # speed + memory test
 
@@ -107,10 +104,6 @@ java -Xmx64m  -cp out minidl.MnistDemo mnist 2 mlp 60000 mmap   # images stay on
 java --add-modules jdk.incubator.vector -Xmx256m -cp out minidl.MixedPrecisionDemo mnist 2   # gradient fidelity + 4 training runs
 ./get-cifar.sh                      # downloads and converts CIFAR-10 into ./cifar (see Step 32 for where the data comes from)
 java --add-modules jdk.incubator.vector -Xmx512m -cp out minidl.CifarDemo cifar-folder 8 aug   # 70.6%, about 8 minutes
-java -XX:+UseSerialGC --add-modules jdk.incubator.vector -Xmx512m -cp out minidl.CifarDemo cifar-folder 2 aug resnet total=6 from=0   # ResNet-style, first 2 of 6 epochs
-java -XX:+UseSerialGC -Xmx512m -cp out minidl.CharLstmDemo input.txt 1500       # LSTM text model, about 90 seconds
-
-# Tip for training on ONE core: add -XX:+UseSerialGC (Java's simplest garbage collector). It was about 1.4x faster than the default here.
 ```
 
 A character-level transformer (about 10 minutes for 3,000 steps on one core):
@@ -216,9 +209,7 @@ All code is in `src/minidl/`.
 | `NDTensor.java` | N-dimensional arrays: views, permute, broadcasting, batched matmul | Images as [N,C,H,W] |
 | `GemmKernel.java`, `src-vector/.../VectorGemm.java` | Plug-in matrix-multiply engine; the optional SIMD version | 7 to 28x faster multiply |
 | `Precision.java`, `Half.java`, `LossScaler.java` | FP16 / BF16 numbers and loss scaling | 16-bit training |
-| `CifarLoader.java`, `CifarConvert.java`, `CifarDemo.java` | CIFAR-10 colour photos: loader, converter, demo (plain CNN or ResNet-style, resumable) | Colour images |
-| `BatchNorm2D.java` | Batch normalization for convolution outputs (per channel) | Steadier deep CNNs |
-| `LSTM.java`, `CharLstmDemo.java` | Recurrent layer with memory gates, and a text model built on it | Sequences, the older way |
+| `CifarLoader.java`, `CifarConvert.java`, `CifarDemo.java` | CIFAR-10 colour photos: loader, converter, demo | Colour images |
 | `MixedPrecisionDemo.java` | 16-bit experiment on real digits | Does loss scaling matter? |
 | `Data.java` | CSV loading, one-hot labels, train/test split | Getting real data in |
 | `MnistLoader.java` | Reads MNIST digit files | Handwritten digits |
@@ -231,7 +222,7 @@ All code is in `src/minidl/`.
 | `CharTransformerDemo.java` | Tiny GPT-style text generator | Sequence-model example |
 | `Benchmark.java` | Speed, memory and int8 tests | Numbers, not feelings |
 | `Main.java` | Runs demos 1-4 | Start here |
-| `Tests.java` | 186 tests, no JUnit needed | Safety net |
+| `Tests.java` | 171 tests, no JUnit needed | Safety net |
 
 Also: `run.sh` (build, test in both kernel modes, demo), `get-mnist.sh`, `.github/workflows/ci.yml` (runs the tests on every push once the project is on GitHub), `LICENSE` (MIT).
 
@@ -968,86 +959,6 @@ The most common mistake: **178 real cats read as dogs**. The ordering makes sens
 
 Honest context: 70.6% is a modest result. The network is small, has no batch normalization in the convolution stages, ran only 8 epochs (validation loss was still falling) and used one seed. Bigger CNNs with more training reach well above 90% on CIFAR-10 (general knowledge, not measured here). The point is that the full colour pipeline works end to end: loader, `ByteSource`, augmentation, `Conv2D` with 3 channels, shape checking, training, per-class report.
 
-### Step 33: Batch normalization for convolutions, and a ResNet-style CIFAR model (`BatchNorm2D`)
-
-`BatchNorm` (Step 11) normalizes every FEATURE of a Dense layer. For convolution outputs the natural unit is the **channel**: `BatchNorm2D` normalizes each channel using ALL the numbers that channel has across the batch and across every pixel position. Example: 32 images of 16 x 16 pixels give 8,192 numbers per channel. Each channel then gets a learned scale (`gamma`) and shift (`beta`). While predicting it uses running averages collected during training, which are saved with the model.
-
-**A ResNet-style block** puts the pieces from earlier steps together:
-
-```java
-new Residual(new Conv2D(16, 16, 16, 16, 3, 1, 1, rnd), new BatchNorm2D(16, 16, 16), new Activations.ReLU(),
-             new Conv2D(16, 16, 16, 16, 3, 1, 1, rnd), new BatchNorm2D(16, 16, 16))      // output = input + this block
-```
-
-followed by a ReLU. Because of the skip connection (Step 22) the gradient has a shortcut, and the normalization keeps the numbers in a healthy range, so such blocks train well even though they are deeper.
-
-**The CIFAR-10 model** (`CifarDemo.resnet`): conv 3 to 16 + BatchNorm2D + ReLU + pool, a residual block at 16 x 16, conv 16 to 32 + BatchNorm2D + ReLU + pool, a residual block at 8 x 8, pool, Dense 10. **33,642 weights**, against 156,074 for the plain CNN of Step 32.
-
-**Measured** (same data, same augmentation, same Adam and cosine schedule):
-
-| Model | Weights | Epochs | Time per epoch | Test accuracy |
-|---|---|---|---|---|
-| Plain CNN (Step 32) | 156,074 | 8 | 61 s | 70.64% |
-| **ResNet-style** | **33,642** | 6 | 98 s | **72.37%** |
-
-Per class (ResNet-style): airplane 77.0%, automobile 85.4%, bird 57.0%, **cat 54.1%** (was 45.5%), deer 64.0%, dog 66.9%, frog 78.9%, horse 78.3%, ship 83.6%, truck 78.5%. The most common mistake is still **179 cats read as dogs**.
-
-How it was trained, honestly: the sandbox this was built in restarted several times and killed long runs, so the 6 epochs were run in **three pieces of 2 epochs**, each continuing from the saved weights and from the right point of the cosine schedule (Step 35). Test accuracy after each piece: **57.80%**, **69.90%**, **72.37%**. Adam's running averages start fresh at each piece, which probably costs a little. An earlier uninterrupted 8-epoch run was killed at epoch 6 (validation loss 0.777, already lower than the plain CNN's final 0.818), so this is likely a fair, slightly pessimistic number. It takes 98 s per epoch instead of 61 s because it does more work at full image resolution on small matrices. The original goal of **85%** was not reached: that needs a wider network, more epochs and more tuning than one CPU core allows here.
-
-### Step 34: LSTM, a layer with memory (`LSTM.java`)
-
-An LSTM reads a sequence one step at a time and carries a **memory** along. At every step it makes four gates from the current input `x` and its previous output `h`:
-
-| Gate | Squashed with | Meaning |
-|---|---|---|
-| `f` (forget) | sigmoid (0 to 1) | how much of the OLD memory to keep |
-| `i` (input) | sigmoid | how much NEW information to write |
-| `g` (candidate) | tanh (-1 to 1) | the new information itself |
-| `o` (output) | sigmoid | how much of the memory to show |
-
-`memory = f * old_memory + i * g`, then `output h = o * tanh(memory)`.
-
-Real numbers, one memory cell: `f = 0.9`, old memory `2.0`, `i = 0.3`, `g = 0.5`, `o = 0.8`. New memory = `0.9 * 2.0 + 0.3 * 0.5 = 1.95`. Output = `0.8 * tanh(1.95) = 0.8 * 0.9603 = 0.768`. When `f` is close to 1 the memory is mostly COPIED forward, so the gradient can travel back through many steps without fading. The forget bias starts at 1 so a new LSTM begins by keeping its memory.
-
-**Backpropagation through time** is the usual backward pass walked from the last step to the first: at each step the gradient arriving from the output and from the next step is turned into gradients for the four gates, then handed to the previous step. The big input multiply for all steps is done in one go; only the small step-to-step multiply is sequential. Input and output are `(N x T*D)` and `(N x T*H)`, so it plugs into `TokenWise`, `Reshape` and the rest like the attention layer.
-
-```java
-new Sequential().add(new Embedding(V, 64, T, rnd)).add(new LSTM(T, 64, 128, rnd))
-    .add(new TokenWise(T, 128, new Dense(128, V, rnd))).add(new Reshape(V));
-```
-
-**Proof:** the output matches a plain double-precision loop of the gate equations (worst difference 6e-8), gradient checks pass, reading is strictly left to right (changing the last step cannot change earlier outputs), and an LSTM learns to name the **previous** token, a task that needs memory (loss 0.001; random guessing is 1.609).
-
-**LSTM versus transformer** on the same job (next character of Tiny Shakespeare), identical batch (32 windows of 32 characters), 1,500 steps, Adam 0.003 with the same cosine schedule, one core:
-
-| Model | Weights | Time per step | Validation loss | Bits per character |
-|---|---|---|---|---|
-| Transformer (2 blocks, 4 heads) | 110,529 | 0.11 s | 1.822 | **2.63** |
-| LSTM (1 layer, 128 memory cells) | 113,409 | **0.06 s** | 1.932 | 2.79 |
-
-(Random guessing is 6.02.) Roughly the same number of weights: the transformer learns more per step, the LSTM is about 1.8x cheaper per step. Text the LSTM wrote (temperature 0.8, prompt `ROMEO:`): `Sbather to twere all detter to fier: / I lire thou dadeners eventer?` followed by invented speaker names. Like the transformer it learned the layout and the spelling of short words, not meaning. Both are single-run, single-seed numbers.
-
-### Step 35: Faster shrunk models, resumable training, and a garbage-collector tip
-
-**Shrunk models now run at float32 speed.** In Step 25 the int8 / int4 / bfloat16 layers ran in plain loops and were slower than float32 once the SIMD kernel existed. Now each quantized layer turns its weights back into floats **one layer at a time into a reusable buffer** (the scale is folded in), and then uses the same fast multiply as the float layers. The stored weights stay compressed; the only extra memory is one temporary float copy of the biggest layer. Measured (one core, Vector API kernels):
-
-| Test | float32 | int8 | int4 | bfloat16 |
-|---|---|---|---|---|
-| MNIST CNN, 10,000 test digits | 0.69 s | 0.78 s | 0.75 s | 0.67 s |
-| 784-512-512-10 network, 10,000 inputs | 282 ms | 278 ms (1.01x) | | |
-| Weights | 107.7 KB | 27.6 KB | 17.8 KB | 56.4 KB |
-| Accuracy | 99.17% | 99.17% | 99.08% | 99.17% |
-
-So the memory saving no longer costs speed. The dequantizing step costs about `inputs x outputs` operations per call, which is small next to the multiply for a batch, but for predicting ONE sample at a time a fused int8 kernel would be better (not built).
-
-**Checkpoints and resuming.** `new Trainer().checkpoint("model.bin")` saves the model after every epoch, so an interrupted run leaves something usable. `continueSchedule(startEpoch, totalEpochs)` makes a new run follow the learning-rate schedule from where the last one stopped (a 2-epoch piece at `continueSchedule(2, 6)` uses the rates of epochs 3 and 4 of a 6-epoch cosine; tested). Only the weights are saved, so the optimizer's running averages start fresh. `CifarDemo` takes `total=6 from=2 resume=file`.
-
-**Sequence targets in `TensorSource`.** A sequence model has several target rows per sample (one answer per position): `new TensorSource(ids, targets, rowsPerSample)`.
-
-**Evaluation memory.** Validation and test passes now work 256 rows at a time (they used 1024), and `BatchNorm` / `BatchNorm2D` do not keep their backward-only buffers while only predicting. This fixed an `OutOfMemoryError` when a ResNet-style CIFAR model was evaluated inside a 512 MB limit.
-
-**Garbage-collector tip.** Every step creates about 100 MB of short-lived tensors. On a one-core machine Java's default collector (G1) spends a lot of time on them. Starting Java with `-XX:+UseSerialGC` measured **123 ms per training step instead of 177 ms** on the ResNet-style model (1.4x), and together with the faster ReLU, max-pool and BatchNorm2D loops the CIFAR epoch dropped from about 190 s to about 98 s. Timings in this sandbox vary from run to run, so treat the ratio as approximate. On a machine with many cores the default collector may be fine.
-
 ---
 
 ## 6. Efficiency: less memory, more speed
@@ -1056,7 +967,7 @@ Rule used here: **measure first, then change, then measure again.** Memory and s
 
 Test machine: **1 CPU core** in a cloud sandbox. Re-run everything with `java -cp out minidl.Benchmark`. All "before" numbers were measured on the same machine in the same session.
 
-### What changed (five rounds)
+### What changed (four rounds)
 
 | Round | Change | Memory | Speed |
 |---|---|---|---|
@@ -1078,10 +989,6 @@ Test machine: **1 CPU core** in a cloud sandbox. Re-run everything with `java -c
 | 4 | **16-bit storage** of what Dense / Conv2D need for backward (Step 28) | **2x** smaller | little |
 | 4 | **Mixed-precision training** with 32-bit master weights, loss scaling (simulated numerics) | memory real, speed not | 1.7 to 3x slower (rounding) |
 | 4 | **Shape inference** (Step 30): wrong sizes caught before training | | saves failed runs |
-| 5 | **Quantized layers dequantize one layer at a time** into a reusable buffer and use the fast multiply (Step 35) | stored weights stay 1 / 0.5 / 2 bytes | int8 / int4 / bfloat16 now about as fast as float32 |
-| 5 | **Validation in chunks of 256**, no backward-only buffers while predicting | far less peak memory for CNNs | |
-| 5 | **Faster ReLU, 2x2 max-pool, BatchNorm2D loops** | | helps every CNN |
-| 5 | **`-XX:+UseSerialGC`** on one core | | 1.4x on a ResNet-style step |
 | 2 | **Binary model files** | 4 bytes per weight instead of ~12 characters of text | much faster to load |
 
 *not measured here: the machine has one core.
@@ -1136,7 +1043,7 @@ Trained with data augmentation (99.19%), then converted. 10,000 unseen test digi
 | int8 (Dense + Conv) | 27.6 KB | 3.9x | **99.17%** |
 | **int4**, group 32 (Dense; Conv int8) | **17.8 KB** | **6.0x** | **99.10%** |
 
-Prediction time for all 10,000 digits (Vector API kernels, after the round-5 change that dequantizes one layer at a time; first pass discarded as JIT warm-up): float32 0.69 s, bfloat16 0.67 s, int8 0.78 s, int4 0.75 s. Accuracy 99.17% (float32, bfloat16, int8) and 99.08% (int4), sizes as in the table. **The shrunk formats now run at about float32 speed** (before round 5 they were up to 4x slower, because their loops were plain Java while float32 used the SIMD kernel). They are still mainly a memory saving.
+Prediction time for all 10,000 digits in the final run (with the Vector API kernels): float32 0.88 s, bfloat16 1.01 s, int8 2.02 s, int4 3.28 s. **The smaller formats are now SLOWER than float32**: their loops are plain Java, while float32 uses the SIMD kernel. Round 3 measured them as about equal because float32 was also plain loops then. Accuracy in that final run was 99.17% (float32, bfloat16, int8) and 99.08% (int4), sizes as in the table. So today these formats are about memory, not speed. A SIMD int8 kernel would change that (see "What is left").
 
 The text model: float32 weights 432 KB; with int8 for its Dense layers 230 KB. Its attention weights stay float32 in this version.
 
@@ -1149,7 +1056,7 @@ The text model: float32 weights 432 KB; with int8 for its Dense layers 230 KB. I
 
 So you trade almost nothing in accuracy for a model that is about 4x smaller.
 
-**Speed of int8, over the rounds.** Before the SIMD kernels, int8 was 1.9x faster than float32 on a large synthetic network (2292 to 1186 ms) because big weight tables are limited by memory traffic. After the SIMD kernels, float32 ran on SIMD and int8 did not, so int8 fell to 0.45x (410 vs 909 ms). Since round 5 each int8 layer is dequantized into a buffer and uses the same fast multiply: **282 ms float32 vs 278 ms int8 (1.01x), with 4.0x less memory**. Always measure on your own model.
+**Speed of int8 is not always better, and with the Vector API kernels it is now usually worse.** Before the SIMD kernels, int8 was 1.9x faster than float32 on a large synthetic network (2292 to 1186 ms), because big weight tables are limited by memory traffic. After them, float32 runs on the SIMD kernel and int8 does not: the same network takes 410 ms in float32 and 909 ms in int8 (0.45x speed, 4.0x less memory). The shrink formats pay off when memory is the limit, not time. Always measure on your own model.
 
 ### How this relates to what AI companies do
 
@@ -1171,9 +1078,8 @@ My first "fused" multiply was actually **slower** (0.84x). One dot product at a 
 
 ### What is left (ideas)
 
-- A fused SIMD int8 / int4 kernel (helps predicting one sample at a time; batches already run at float speed)
-- Vector API for the non-multiply loops (im2col, pooling, activations, attention scores, BatchNorm)
-- Reusing output buffers between steps to cut the garbage the collector has to handle
+- A SIMD **int8 / int4 kernel**, so the shrunk models are fast as well as small
+- Vector API for the non-multiply loops (im2col, pooling, activations, attention scores)
 - Real 16-bit arithmetic (needs hardware or a language that exposes it)
 - 16-bit storage for LayerNorm, BatchNorm and attention (only Dense, Conv2D and ReLU use it now)
 - A bigger-than-2 GB dataset split over several mapped files
@@ -1377,7 +1283,7 @@ for (int step = 0; step < 1500; step++) {
 }
 ```
 
-**Demo 8: CIFAR-10 colour photos** (`CifarDemo`): the plain CNN reaches **70.64%** (156,074 weights, 8 epochs, 61 s per epoch, inside `-Xmx512m`); the ResNet-style model with BatchNorm2D and residual blocks reaches **72.37%** with 33,642 weights (6 epochs, run in three resumable pieces, 98 s per epoch). Weakest class: cat (45.5% plain, 54.1% ResNet-style); most common mistake: about 180 cats read as dogs. Details, data source and per-class tables are in Steps 32 and 33.
+**Demo 8: CIFAR-10 colour photos** (`CifarDemo`): **70.64%** on the 10,000 unseen test photos, 156,074 weights, 8 epochs, 61 s per epoch, inside `-Xmx512m`. Weakest class: cat (45.5%); most common mistake: 178 cats read as dogs. Full details, the data source and the per-class table are in Step 32.
 
 **Demo 9: 16-bit training on real digits** (`MixedPrecisionDemo`): the gradient tables and the four training runs (FP32 96.47%, BF16 96.60%, FP16 without scaling 96.54%, FP16 with dynamic scaling 96.60% after 2 epochs) are in Step 28. FP16 without loss scaling lost 3.0% of the gradient entries (4.5% at batch 1024); scaling rescued them.
 
@@ -1616,7 +1522,7 @@ Knowing the limits of your own project is a good sign, not a bad one.
 - The Vector API is an **incubator module**: it needs `--add-modules jdk.incubator.vector` and its interface may change. It was built and tested on Java 21 only (the code uses calls that also exist in Java 17, untested), on an AVX-512 CPU. Speeds differ on other CPUs.
 - Only the matrix multiplies use SIMD. Patch building, pooling, activations and the attention loops are plain Java.
 - The multi-core code is tested for correctness but its speedup is **unverified**: the test machine had one core. Repeated runs vary a lot (the 512 multiply measured between 30 and 75 GFLOP/s), so read speeds as orders of magnitude.
-- The shrunk models (bfloat16, int8, int4) run at about float32 speed because each layer is dequantized into a temporary float buffer first (round 5). There is no fused int8 kernel, so predicting a single sample at a time pays the dequantizing cost for nothing.
+- The shrunk models (bfloat16, int8, int4) have no SIMD kernel, so they are **slower** than float32 now (int8 0.45x speed). They save memory, not time.
 - Grouped and depthwise convolutions run one small multiply per group: few weights, but not tuned for speed.
 
 **Memory and numbers**
@@ -1629,7 +1535,7 @@ Knowing the limits of your own project is a good sign, not a bad one.
 
 **Features**
 - The training layers work on 2D tables (one flattened sample per row). `NDTensor` and shape inference give N-dimensional shapes, but the layers do not use `NDTensor` inside.
-- There is one recurrent layer (`LSTM`; no GRU, no bidirectional or stacked helpers), no dilated attention or other transformer variants, and no augmentation beyond shifts, rotations and flips. BatchNorm2D exists, but there is no ResNet beyond the small CIFAR model of Step 33.
+- **No LSTM or other recurrent layers**, no batch normalization for convolutions, no residual CNN demo, no augmentation beyond shifts, rotations and flips.
 - The transformer is small and decoder-only (it can generate text but not translate), with no dropout, no weight tying and no tokenizer beyond single characters.
 - `Sequential` is a straight line of layers; branching is done with `Residual` blocks. No general graphs.
 - Autograd (`Var`, `AutoLayer`) works on 2D tensors with 33 operations. Autograd layers are about 2x slower and use about 3x the memory of the hand-written ones. The built-in layers keep their hand-written backward.
@@ -1639,7 +1545,6 @@ Knowing the limits of your own project is a good sign, not a bad one.
 **Honesty about results**
 - Demos 2 to 4 use **synthetic** data (made by formulas), so the right answer is known. Real data is messier.
 - The MNIST and CIFAR numbers are from one run each, one setting, one random seed, no tuning. Larger CNNs with augmentation reach higher on MNIST, and much higher (above 90%) on CIFAR-10. 70.64% on CIFAR-10 is modest.
-- The ResNet-style CIFAR number (72.37%) comes from three resumed pieces with the optimizer state reset between pieces, single seed. The original 85% goal was not reached.
 - The CIFAR-10 data came from an npm mirror (checked: file sizes, label order, class counts), not from the official site.
 - The text model does not write meaningful English. It learned spelling and layout.
 - Not production ready. For real products use DL4J, PyTorch or TensorFlow.
@@ -1681,15 +1586,13 @@ Done items are ticked. Phases 1 to 3 are complete.
 
 **Phase 4: advanced**
 - [x] Attention layer and a tiny transformer; character-level text generator on Tiny Shakespeare
-- [x] **Recurrent layer / LSTM** (Step 34), compared with the transformer
-- [ ] Dropout, weight tying and a word-piece tokenizer for the transformer; a bigger context window; a GRU layer
-- [x] **Batch normalization for convolutions** (`BatchNorm2D`) and a **ResNet-style CIFAR model**: 72.37% with 33,642 weights
-- [ ] A bigger, longer-trained ResNet to push CIFAR-10 past 85% (the 85% goal was not reached on one core)
+- [ ] Recurrent layer / LSTM for sequences
+- [ ] Dropout, weight tying and a word-piece tokenizer for the transformer; a bigger context window
+- [ ] Batch normalization for convolutions and a ResNet-style CIFAR model (to push CIFAR-10 past 85%)
 - [ ] GPU through native bindings (very hard, very impressive)
 
 **Next ideas for speed and memory**
-- [x] Shrunk models as fast as float32 (dequantize one layer at a time, then the fast multiply)
-- [ ] A fused SIMD int8 / int4 kernel for single-sample prediction
+- [ ] SIMD int8 / int4 kernels (so shrunk models are fast as well as small)
 - [ ] Vector API for im2col, pooling, activations and attention
 - [ ] Test the SIMD build on Java 17 and on an AVX2 CPU
 - [ ] 16-bit storage for LayerNorm, BatchNorm and attention
@@ -1720,9 +1623,6 @@ Done items are ticked. Phases 1 to 3 are complete.
 | `token id N is outside 0..V-1` | Vocabulary size does not match the data | Build the model with `source.vocabSize()` |
 | `TokenWise expects N numbers per sequence` | Sequence length or width differs between layers | Keep `T` and `D` the same in `Embedding`, attention and `TokenWise` |
 | `Residual block must keep the shape` | The inner layers change the number of columns | Make the last inner layer output the same width as the input |
-| `OutOfMemoryError` while validating a CNN | Too many images per prediction chunk, or a layer holding backward-only buffers | Evaluation now uses chunks of 256 and does not keep them when predicting. Still stuck: lower `-Xmx` use is not the fix, raise it or use a smaller batch |
-| Training is slow on one core and the garbage collector shows up in profiles | The default collector (G1) is busy with 100 MB of short-lived tensors per step | Start Java with `-XX:+UseSerialGC` |
-| A long run was interrupted | Machine restart, timeout | Use `Trainer.checkpoint(...)` and continue with `continueSchedule(from, total)` and `resume=` (Step 35) |
 | `WARNING: Using incubator modules: jdk.incubator.vector` | Normal: the Vector API is an incubator module | Ignore it, or filter it out as `run.sh` does |
 | Kernel name says "portable Java loops" | Java was started without `--add-modules jdk.incubator.vector`, or the vector class was not compiled | Compile `src-vector/minidl/*.java` with the flag and start Java with it. Check `Tensor.kernelName()` |
 | FP16 training: loss `NaN` or many skipped steps | Overflow: scale too big, or values above 65,504 | Use `LossScaler.dynamic()` (the default), lower the learning rate, or use `Precision.BF16` |
@@ -1807,18 +1707,12 @@ Done items are ticked. Phases 1 to 3 are complete.
 - **View**: a different shape for the same numbers, without copying.
 - **Shape inference**: working out the size of every layer's output before running, to catch mistakes.
 - **Batched matmul**: many matrix multiplications at once, one per batch entry.
-- **LSTM**: a recurrent layer with a memory cell and four gates (forget, input, candidate, output).
-- **Gate**: a number between 0 and 1 that says how much of something to let through.
-- **Backpropagation through time**: backprop for a recurrent layer, walked from the last step to the first.
-- **Per-channel normalization (BatchNorm2D)**: normalizing every channel over the batch and all pixel positions.
-- **Checkpoint**: a saved copy of the model during training, so an interrupted run is not lost.
-- **Garbage collector**: the part of Java that frees memory nobody uses any more; it can be a large share of the time when a program makes lots of short-lived data.
 
 ---
 
 ## 16. Tests
 
-`java -cp out minidl.Tests` runs **186 checks, all passing**. `run.sh` runs the suite twice, once with the portable kernels and once with the Vector API kernels, so both paths are tested.
+`java -cp out minidl.Tests` runs **171 checks, all passing**. `run.sh` runs the suite twice, once with the portable kernels and once with the Vector API kernels, so both paths are tested.
 
 - **Maths and kernels:** matmul matches hand-checked values and the textbook version; `A^T.B` and `A.B^T` match; multi-thread equals single-thread; **the Vector API kernels match the textbook multiply on 10 awkward shapes** (1x1, odd sizes, 64x784x128, ...); shape mismatches give clear errors
 - **Gradient checks** (float32 tolerance): Dense with Tanh, ReLU, LeakyReLU, GELU, Sigmoid; BatchNorm, LayerNorm; SoftmaxCrossEntropy, BCEWithLogits, MAE; Conv2D (stride, padding, stacked); **dilated, grouped and depthwise-separable convolution**; max and average pooling; a Residual block; the whole mini transformer
@@ -1832,9 +1726,6 @@ Done items are ticked. Phases 1 to 3 are complete.
 - **Data:** `ByteSource` 1 byte per value, free views, `MappedSource` equals `ByteSource`, `CharSource`, CSV, split, MNIST format, **CIFAR-10 binary format** (with error for wrong files), colour augmentation (channels move together, flips)
 - **Shrinking:** int8 Dense and Conv2D, int4, bfloat16, quantizing blocks inside transformers, clear error when training a quantized layer
 - **Save/load:** text and binary files rebuild CNNs, nested transformers, grouped convolutions, autograd layers and int8/int4/bfloat16 models with identical predictions
-- **BatchNorm2D and ResNet blocks:** every channel has mean 0 and std 1 over batch and pixels; running averages used when predicting; gradient checks for Conv2D + BatchNorm2D and for a residual block of convolutions; save and load with identical predictions
-- **LSTM:** matches a plain double-precision reference of the gate equations (worst difference 6e-8); gradient check through 4 time steps; strictly left to right; learns to recall the previous token; save and load
-- **Checkpoints and schedules:** `Trainer.checkpoint` saves after every epoch and the file reloads to identical predictions; `continueSchedule(2, 6)` uses the learning rates of epochs 3 and 4 of a 6-epoch cosine
 - **Optimizers, schedules, early stopping, Normalizer, BatchNorm, Dropout, Metrics, augmentation**
 
 ---
@@ -1844,3 +1735,47 @@ Done items are ticked. Phases 1 to 3 are complete.
 MIT. See `LICENSE`.
 
 Built by Manish Gowda N.
+
+---
+
+## 18. Use it as a library, jar and Maven
+
+```
+./build-jar.sh                       # dist/minidl-1.0.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
+java -jar dist/minidl-1.0.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
+```
+In your own project, put `minidl-1.0.0.jar` on the classpath (`javac -cp minidl-1.0.0.jar MyApp.java`) and `import minidl.*;`.
+With Maven: `mvn verify` compiles, runs the test suite and builds the jars (`pom.xml`, no dependencies); `mvn install` puts it in your local repository, then:
+```xml
+<dependency><groupId>io.github.manishn1877</groupId><artifactId>minidl</artifactId><version>1.0.0</version></dependency>
+```
+Quality gates: compiles with `-Xlint:all` without a single warning, javadoc has no errors (`-Xdoclint:all,-missing`), CI runs on Java 17 and 21. Model files from outside are checked: a damaged or hostile file gives an `IOException` with a clear message, never a crash or a giant memory allocation.
+
+## 17. Handwriting recognition web app (digits and letters)
+
+Draw in the browser and the model reads it live. Pure Java on the server (the JDK's built-in `com.sun.net.httpserver`, no libraries), one plain HTML file for the page.
+
+```
+./run-web.sh                 # digits: uses mnist-cnn-aug.bin / mnist-cnn.bin from MnistDemo
+./get-emnist.sh              # letters: download EMNIST letters (~35 MB) into ./emnist
+java -Xmx512m -cp out minidl.EmnistDemo emnist 8 124800 aug     # train the letters model
+./run-web.sh letters         # letters A-Z, uses emnist-letters-cnn.bin
+```
+Then open http://localhost:8080. The page works out by itself whether the model reads 10 digits or 26 letters.
+
+What it does:
+- **One character or many.** "Many" mode splits the drawing by the empty gaps between characters and reads each one (`2024`, `HELLO`). Characters that touch are read as one: a known limit.
+- **Preprocessing that matches the training data** (`DigitPreprocess`). Digits (MNIST style): crop to the ink, longer side 20 px, centre by centre of mass. Letters (EMNIST style): longer side 24 px, centred by bounding box. A 99% model reads a small or off-centre drawing badly without this. The page shows "what the model sees".
+- **Steadier answers** (`DigitRecognizer`): optional test-time augmentation averages the answer over the picture nudged 1 px in four directions.
+- **Teach it.** If it is wrong, press the right character. The model takes a few small training steps on your drawing, mixed with earlier corrections and real training pictures (so it does not forget the rest). Corrections are appended to `feedback.bin` / `feedback-letters.bin` (784 pixel bytes + 1 label byte each). "save tuned model" writes `<model>-tuned.bin`; "reset model" restores the original weights.
+- **Train on my handwriting.** The page asks for one character at a time (all of them, shuffled, each round). Draw it, press Enter: the page first checks whether the model already got it right (the score shows how well it knows YOUR writing), then learns from it. Do a round or two and your handwriting gets read better.
+- **Load a photo or scan** of handwriting (background removed and contrast stretched in the page).
+- Shows the 6 most likely answers, the milliseconds per answer, and the test accuracy.
+
+EMNIST letters: 124,800 train + 20,800 test pictures, 26 classes. `EmnistLoader` turns every picture back upright (EMNIST stores them sideways) and shifts labels 1..26 to 0..25. Upper and lower case share one class, so answers are shown as capitals. Letters are harder than digits ("I" vs "l", "O" vs "Q"): expect roughly 90 to 93% on the test set, not 99%.
+
+Limits: one user at a time is the intended use (corrections change the one shared model); the server listens on localhost only. The EMNIST-style preprocessing follows the paper's description: if letters are read badly, compare "what the model sees" with real EMNIST pictures and tune the 24 px box in `DigitPreprocess`.
+
+**Digits AND letters in one model (36 classes: 0-9, A-Z).** `./train-all.sh` also trains `alnum-cnn.bin` (`AlnumDemo`), and `./run-web.sh all` opens the page with it, so one drawing like `K7B2` is read in one go. `Alnum` puts MNIST digits and EMNIST letters into one shuffled data set, re-making every digit in the EMNIST style so the model sees one kind of picture. Pairs that look the same (0/O, 1/I, 2/Z, 5/S, 8/B) can only be guessed from the shape and the writer's habit, so expect a few more mix-ups than with the two separate models. If you know it is a number, use the digits page.
+
+Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. 29 new tests (197 total).

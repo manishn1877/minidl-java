@@ -53,15 +53,33 @@ public final class MnistLoader {
      * 8x smaller than doubles, 4x smaller than floats. Pair it with the Trainer (it converts one batch at a time).
      */
     public static ByteSource loadSource(String imagesPath, String labelsPath, int maxCount) throws IOException {
-        byte[] pixels; int dim, n;
+        return loadSource(imagesPath, labelsPath, maxCount, 10, 0, false);
+    }
+
+    /**
+     * Same, for other IDX data sets. classes = number of answers, labelShift is subtracted from every label
+     * (EMNIST letters are numbered 1..26, we want 0..25), transpose = EMNIST stores every picture turned on its side.
+     */
+    public static ByteSource loadSource(String imagesPath, String labelsPath, int maxCount, int classes, int labelShift, boolean transpose) throws IOException {
+        byte[] pixels; int dim, n, side = 0;
         try (DataInputStream in = open(imagesPath)) {
             int magic = in.readInt();
             if (magic != 2051) throw new IOException("not an MNIST image file (magic " + magic + ")");
             n = Math.min(in.readInt(), maxCount);
             int rows = in.readInt(), cols = in.readInt();
             dim = rows * cols;
+            if (transpose && rows != cols) throw new IOException("can only transpose square pictures");
+            side = rows;
             pixels = new byte[n * dim];
             in.readFully(pixels);
+        }
+        if (transpose) {
+            byte[] t = new byte[side * side];
+            for (int i = 0; i < n; i++) {
+                int base = i * dim;
+                for (int y = 0; y < side; y++) for (int x = 0; x < side; x++) t[y * side + x] = pixels[base + x * side + y];
+                System.arraycopy(t, 0, pixels, base, dim);
+            }
         }
         byte[] labels = new byte[n];
         try (DataInputStream in = open(labelsPath)) {
@@ -70,7 +88,12 @@ public final class MnistLoader {
             in.readInt();
             in.readFully(labels);
         }
-        return new ByteSource(pixels, dim, labels, 10);
+        for (int i = 0; i < n; i++) {
+            int v = (labels[i] & 0xFF) - labelShift;
+            if (v < 0 || v >= classes) throw new IOException("label " + (v + labelShift) + " is outside 0.." + (classes - 1 + labelShift));
+            labels[i] = (byte) v;
+        }
+        return new ByteSource(pixels, dim, labels, classes);
     }
 
 
