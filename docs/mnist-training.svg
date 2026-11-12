@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="366" viewBox="0 0 1380 366" font-family="sans-serif" font-size="12">
+<rect width="100%" height="100%" fill="white"/>
+<text x="690" y="22" text-anchor="middle" font-size="15" font-weight="bold">MiniDL: loss per epoch (from docs\logs)</text>
+<text x="251" y="74" text-anchor="middle" font-weight="bold">Mnist cnn aug 8 epochs</text>
+<line x1="58" y1="320.0" x2="444" y2="320.0" stroke="#e0e0e0"/>
+<text x="52" y="324.0" text-anchor="end">0.00</text>
+<line x1="58" y1="262.0" x2="444" y2="262.0" stroke="#e0e0e0"/>
+<text x="52" y="266.0" text-anchor="end">0.12</text>
+<line x1="58" y1="204.0" x2="444" y2="204.0" stroke="#e0e0e0"/>
+<text x="52" y="208.0" text-anchor="end">0.23</text>
+<line x1="58" y1="146.0" x2="444" y2="146.0" stroke="#e0e0e0"/>
+<text x="52" y="150.0" text-anchor="end">0.35</text>
+<line x1="58" y1="88.0" x2="444" y2="88.0" stroke="#e0e0e0"/>
+<text x="52" y="92.0" text-anchor="end">0.46</text>
+<line x1="58" y1="320" x2="444" y2="320" stroke="#444"/>
+<line x1="58" y1="88" x2="58" y2="320" stroke="#444"/>
+<text x="58.0" y="336" text-anchor="middle">1</text>
+<text x="113.1" y="336" text-anchor="middle">2</text>
+<text x="168.3" y="336" text-anchor="middle">3</text>
+<text x="223.4" y="336" text-anchor="middle">4</text>
+<text x="278.6" y="336" text-anchor="middle">5</text>
+<text x="333.7" y="336" text-anchor="middle">6</text>
+<text x="388.9" y="336" text-anchor="middle">7</text>
+<text x="444.0" y="336" text-anchor="middle">8</text>
+<text x="251" y="354" text-anchor="middle">epoch</text>
+<text transform="translate(14 204) rotate(-90)" text-anchor="middle">loss</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2" points="58.0,105.2 113.1,228.9 168.3,249.2 223.4,261.3 278.6,268.1 333.7,273.2 388.9,277.7 444.0,278.6"/>
+<circle cx="58.0" cy="105.2" r="3.5" fill="#1f77b4"/>
+<circle cx="113.1" cy="228.9" r="3.5" fill="#1f77b4"/>
+<circle cx="168.3" cy="249.2" r="3.5" fill="#1f77b4"/>
+<circle cx="223.4" cy="261.3" r="3.5" fill="#1f77b4"/>
+<circle cx="278.6" cy="268.1" r="3.5" fill="#1f77b4"/>
+<circle cx="333.7" cy="273.2" r="3.5" fill="#1f77b4"/>
+<circle cx="388.9" cy="277.7" r="3.5" fill="#1f77b4"/>
+<circle cx="444.0" cy="278.6" r="3.5" fill="#1f77b4"/>
+<polyline fill="none" stroke="#ff7f0e" stroke-width="2" points="58.0,281.9 113.1,286.4 168.3,293.1 223.4,294.7 278.6,297.4 333.7,297.5 388.9,298.4 444.0,298.8"/>
+<circle cx="58.0" cy="281.9" r="3.5" fill="#ff7f0e"/>
+<circle cx="113.1" cy="286.4" r="3.5" fill="#ff7f0e"/>
+<circle cx="168.3" cy="293.1" r="3.5" fill="#ff7f0e"/>
+<circle cx="223.4" cy="294.7" r="3.5" fill="#ff7f0e"/>
+<circle cx="278.6" cy="297.4" r="3.5" fill="#ff7f0e"/>
+<circle cx="333.7" cy="297.5" r="3.5" fill="#ff7f0e"/>
+<circle cx="388.9" cy="298.4" r="3.5" fill="#ff7f0e"/>
+<circle cx="444.0" cy="298.8" r="3.5" fill="#ff7f0e"/>
+<rect x="314" y="94" width="124" height="38" fill="white" stroke="#ccc"/>
+<line x1="322" y1="105" x2="344" y2="105" stroke="#1f77b4" stroke-width="2"/><text x="350" y="109">training loss</text>
+<line x1="322" y1="122" x2="344" y2="122" stroke="#ff7f0e" stroke-width="2"/><text x="350" y="126">validation loss</text>
+<text x="711" y="74" text-anchor="middle" font-weight="bold">Mnist resnet 4 epochs 12000 images</text>
+<line x1="518" y1="320.0" x2="904" y2="320.0" stroke="#e0e0e0"/>
+<text x="512" y="324.0" text-anchor="end">0.00</text>
+<line x1="518" y1="262.0" x2="904" y2="262.0" stroke="#e0e0e0"/>
+<text x="512" y="266.0" text-anchor="end">0.24</text>
+<line x1="518" y1="204.0" x2="904" y2="204.0" stroke="#e0e0e0"/>
+<text x="512" y="208.0" text-anchor="end">0.48</text>
+<line x1="518" y1="146.0" x2="904" y2="146.0" stroke="#e0e0e0"/>
+<text x="512" y="150.0" text-anchor="end">0.72</text>
+<line x1="518" y1="88.0" x2="904" y2="88.0" stroke="#e0e0e0"/>
+<text x="512" y="92.0" text-anchor="end">0.96</text>
+<line x1="518" y1="320" x2="904" y2="320" stroke="#444"/>
+<line x1="518" y1="88" x2="518" y2="320" stroke="#444"/>
+<text x="518.0" y="336" text-anchor="middle">1</text>
+<text x="646.7" y="336" text-anchor="middle">2</text>
+<text x="775.3" y="336" text-anchor="middle">3</text>
+<text x="904.0" y="336" text-anchor="middle">4</text>
+<text x="711" y="354" text-anchor="middle">epoch</text>
+<text transform="translate(474 204) rotate(-90)" text-anchor="middle">loss</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2" points="518.0,105.2 646.7,275.7 775.3,294.3 904.0,299.7"/>
+<circle cx="518.0" cy="105.2" r="3.5" fill="#1f77b4"/>
+<circle cx="646.7" cy="275.7" r="3.5" fill="#1f77b4"/>
+<circle cx="775.3" cy="294.3" r="3.5" fill="#1f77b4"/>
+<circle cx="904.0" cy="299.7" r="3.5" fill="#1f77b4"/>
+<polyline fill="none" stroke="#ff7f0e" stroke-width="2" points="518.0,246.6 646.7,272.6 775.3,290.4 904.0,296.5"/>
+<circle cx="518.0" cy="246.6" r="3.5" fill="#ff7f0e"/>
+<circle cx="646.7" cy="272.6" r="3.5" fill="#ff7f0e"/>
+<circle cx="775.3" cy="290.4" r="3.5" fill="#ff7f0e"/>
+<circle cx="904.0" cy="296.5" r="3.5" fill="#ff7f0e"/>
+<rect x="774" y="94" width="124" height="38" fill="white" stroke="#ccc"/>
+<line x1="782" y1="105" x2="804" y2="105" stroke="#1f77b4" stroke-width="2"/><text x="810" y="109">training loss</text>
+<line x1="782" y1="122" x2="804" y2="122" stroke="#ff7f0e" stroke-width="2"/><text x="810" y="126">validation loss</text>
+<text x="1171" y="74" text-anchor="middle" font-weight="bold">Transformer bpe 400 steps</text>
+<line x1="978" y1="320.0" x2="1364" y2="320.0" stroke="#e0e0e0"/>
+<text x="972" y="324.0" text-anchor="end">0.00</text>
+<line x1="978" y1="262.0" x2="1364" y2="262.0" stroke="#e0e0e0"/>
+<text x="972" y="266.0" text-anchor="end">1.52</text>
+<line x1="978" y1="204.0" x2="1364" y2="204.0" stroke="#e0e0e0"/>
+<text x="972" y="208.0" text-anchor="end">3.05</text>
+<line x1="978" y1="146.0" x2="1364" y2="146.0" stroke="#e0e0e0"/>
+<text x="972" y="150.0" text-anchor="end">4.57</text>
+<line x1="978" y1="88.0" x2="1364" y2="88.0" stroke="#e0e0e0"/>
+<text x="972" y="92.0" text-anchor="end">6.10</text>
+<line x1="978" y1="320" x2="1364" y2="320" stroke="#444"/>
+<line x1="978" y1="88" x2="978" y2="320" stroke="#444"/>
+<text x="978.0" y="336" text-anchor="middle">1</text>
+<text x="1033.1" y="336" text-anchor="middle">2</text>
+<text x="1143.4" y="336" text-anchor="middle">4</text>
+<text x="1253.7" y="336" text-anchor="middle">6</text>
+<text x="1364.0" y="336" text-anchor="middle">8</text>
+<text x="1171" y="354" text-anchor="middle">epoch</text>
+<text transform="translate(934 204) rotate(-90)" text-anchor="middle">loss</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2" points="978.0,105.2 1033.1,124.9 1143.4,146.5 1253.7,156.6 1364.0,160.1"/>
+<circle cx="978.0" cy="105.2" r="3.5" fill="#1f77b4"/>
+<circle cx="1033.1" cy="124.9" r="3.5" fill="#1f77b4"/>
+<circle cx="1143.4" cy="146.5" r="3.5" fill="#1f77b4"/>
+<circle cx="1253.7" cy="156.6" r="3.5" fill="#1f77b4"/>
+<circle cx="1364.0" cy="160.1" r="3.5" fill="#1f77b4"/>
+<polyline fill="none" stroke="#ff7f0e" stroke-width="2" points="978.0,119.6 1033.1,137.8 1143.4,153.6 1253.7,160.6 1364.0,163.1"/>
+<circle cx="978.0" cy="119.6" r="3.5" fill="#ff7f0e"/>
+<circle cx="1033.1" cy="137.8" r="3.5" fill="#ff7f0e"/>
+<circle cx="1143.4" cy="153.6" r="3.5" fill="#ff7f0e"/>
+<circle cx="1253.7" cy="160.6" r="3.5" fill="#ff7f0e"/>
+<circle cx="1364.0" cy="163.1" r="3.5" fill="#ff7f0e"/>
+<rect x="1234" y="94" width="124" height="38" fill="white" stroke="#ccc"/>
+<line x1="1242" y1="105" x2="1264" y2="105" stroke="#1f77b4" stroke-width="2"/><text x="1270" y="109">training loss</text>
+<line x1="1242" y1="122" x2="1264" y2="122" stroke="#ff7f0e" stroke-width="2"/><text x="1270" y="126">validation loss</text>
+</svg>

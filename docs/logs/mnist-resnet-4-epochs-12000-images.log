@@ -1,0 +1,58 @@
+train 10800, validation 1200, test 10000   (image data in memory: 17.3 MB as bytes; as double it would be 138 MB)
+Layer                       Weights
+Conv2D 1 28 28 8 3 1 1           80
+BatchNorm2D 8 28 28 0.9          16
+ReLU                              0
+Residual [Conv2D 8 28 28 8 3 1 1 | BatchNorm2D 8 28 28 0.9 | ReLU | Conv2D 8 28 28 8 3 1 1 | BatchNorm2D 8 28 28 0.9]       1200
+ReLU                              0
+Conv2D 8 28 28 16 3 2 1        1168
+BatchNorm2D 16 14 14 0.9         32
+ReLU                              0
+Residual [Conv2D 16 14 14 16 3 1 1 | BatchNorm2D 16 14 14 0.9 | ReLU | Conv2D 16 14 14 16 3 1 1 | BatchNorm2D 16 14 14 0.9]       4704
+ReLU                              0
+Conv2D 16 14 14 32 3 2 1       4640
+BatchNorm2D 32 7 7 0.9           64
+ReLU                              0
+Residual [Conv2D 32 7 7 32 3 1 1 | BatchNorm2D 32 7 7 0.9 | ReLU | Conv2D 32 7 7 32 3 1 1 | BatchNorm2D 32 7 7 0.9]      18624
+ReLU                              0
+AvgPool2D 32 7 7 7                0
+Dense 32 10                     330
+TOTAL                         30858
+weights memory: 121.9 KB (float32)
+epoch    1  loss 0.88471  val 0.30227
+epoch    2  loss 0.18237  val 0.19503
+epoch    3  loss 0.10565  val 0.12179
+epoch    4  loss 0.08355  val 0.09671
+trained 4 epochs in 223.8 s (55.9 s/epoch)
+TEST accuracy on 10000 unseen digits: 97.60%   (17.83 s for all test digits)
+truth \ predicted
+          0    1    2    3    4    5    6    7    8    9
+    0   963    0    4    0    1    1    6    2    3    0
+    1     0 1126    3    3    0    1    1    1    0    0
+    2     2    0 1021    3    0    0    0    3    3    0
+    3     0    0    3  986    0   15    0    4    2    0
+    4     1    1    0    2  953    0    5    1    2   17
+    5     2    0    0    6    0  876    1    1    4    2
+    6    19    4    6    0    2    3  921    0    3    0
+    7     0    3    9    7    0    0    0 1006    0    3
+    8     4    0    6    5    5    3    0    2  941    8
+    9     5    3    0    2    8   10    0    9    5  967
+class  precision    recall        f1    count
+0          0.967     0.983     0.975      980
+1          0.990     0.992     0.991     1135
+2          0.971     0.989     0.980     1032
+3          0.972     0.976     0.974     1010
+4          0.983     0.970     0.977      982
+5          0.964     0.982     0.973      892
+6          0.986     0.961     0.974      958
+7          0.978     0.979     0.978     1028
+8          0.977     0.966     0.972      974
+9          0.970     0.958     0.964     1009
+
+model                        weights KB   accuracy   time (s)
+float32                           121.9     97.60%      19.61
+bfloat16 (Dense)                  121.2     97.61%      18.41
+int8 (Dense + Conv)                33.6     97.64%      23.79
+int4 group 32 (Dense)              33.5     97.57%      23.74
+files: mnist-resnet.bin 122 KB, mnist-resnet-int8.bin 34 KB
+DONE

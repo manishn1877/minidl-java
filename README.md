@@ -1504,10 +1504,10 @@ What is different at scale:
 
 Even so, the foundation is identical: **forward → loss → backward → update**. Once you understand this project, a PyTorch training loop will look familiar line by line:
 
-```python
-loss = loss_fn(model(x), y)   # forward + loss   (Sequential.forward, Loss.forward)
-loss.backward()               # backprop          (Sequential.backward)
-optimizer.step()              # update            (Optimizer.step)
+```java
+double loss = lossFn.forward(model.forward(x), y);   // forward + loss   (Sequential.forward, Loss.forward)
+model.backward(lossFn.backward());                   // backprop          (Sequential.backward)
+optimizer.step(model.params());                      // update            (Optimizer.step)
 ```
 
 ---
@@ -1555,7 +1555,7 @@ Knowing the limits of your own project is a good sign, not a bad one.
 
 ## 13. Future: what to build next
 
-Done items are ticked. Phases 1 to 3 are complete.
+Done items are ticked. Phases 1 to 3 are complete; Phases 4 to 6 are partly done (see the unticked items).
 
 **Phase 1: training toolkit** (done)
 - [x] CSV loader, train/validation split, early stopping
@@ -1586,9 +1586,12 @@ Done items are ticked. Phases 1 to 3 are complete.
 
 **Phase 4: advanced**
 - [x] Attention layer and a tiny transformer; character-level text generator on Tiny Shakespeare
-- [ ] Recurrent layer / LSTM for sequences
-- [ ] Dropout, weight tying and a word-piece tokenizer for the transformer; a bigger context window
-- [ ] Batch normalization for convolutions and a ResNet-style CIFAR model (to push CIFAR-10 past 85%)
+- [x] **Recurrent layer / LSTM** for sequences (`LSTM`, full backpropagation through time, gradient-checked; learns to remember the first of 6 numbers: 99% on new data)
+- [x] **Sub-word tokenizer** (`BpeTokenizer`) now **wired into the transformer demo**: `CharTransformerDemo shakespeare.txt 400 --bpe 400` (Tiny Shakespeare, 1.1M characters = 533,487 tokens; 400 steps in 109 s took the validation loss from 5.99 (random guessing) to 4.12 per token; the samples are rough, the run was short)
+- [x] **Dropout** (`--dropout 0.1`) and a **configurable context window** (`--context 64`) in the transformer demo
+- [ ] Weight tying (the same matrix as input embedding and output layer): needs shared parameters, which the framework does not have yet
+- [x] **Batch normalization for convolutions** (`BatchNorm2D`) and a **ResNet-style model** (`ResNet.build`; MNIST: 97.60% on the 10,000 test digits after 4 epochs on only 12,000 training images)
+- [ ] Train the ResNet on CIFAR-10 and see whether it passes 85% (`CifarDemo <folder> 8 aug 50000 resnet`; **not run: no CIFAR data was available when this was built**)
 - [ ] GPU through native bindings (very hard, very impressive)
 
 **Next ideas for speed and memory**
@@ -1599,9 +1602,15 @@ Done items are ticked. Phases 1 to 3 are complete.
 - [ ] Make the layers use `NDTensor` internally
 
 **Phase 5: polish for recruiters**
-- [ ] Put it on GitHub; the included CI file runs the tests (portable and SIMD) on every push
-- [ ] Add plots of training vs validation loss to the README
-- [ ] Record a 2-minute demo of MNIST training in a 256 MB limit, and of the text generator
+- [x] CI file (Java 17 and 21: tests, jars, version check). It runs when you push; check the Actions tab
+- [x] Plots of training vs validation loss (`docs/mnist-training.svg`, drawn by the Java class `Plot` from the real logs in `docs/logs`: `java -jar dist/minidl-1.3.0.jar plot`)
+- [x] GitHub Pages site (`SiteBuilder`, section 21)
+- [ ] Record a 2-minute demo of MNIST training in a 256 MB limit, and of the text generator (needs a screen recording: not possible to make here)
+
+**Phase 6: serving and PyTorch (new, from analysing DJL Serving)**
+- [x] **Model server** (`ModelServer`, `ModelPool`): worker pool per model, dynamic batching, bounded queue (503 when full), scaling, REST API and Prometheus `/metrics`. See section 19 and `docs/DJL-ANALYSIS.md`
+- [x] **PyTorch interop, Java only**: `SafeTensors` reads/writes the safetensors format and maps Dense, Conv2D and BatchNorm2D to PyTorch names and layouts (section 20). No Python anywhere in the project
+- [ ] Check it with a file written by real PyTorch (none was available here)
 
 ---
 
@@ -1741,13 +1750,13 @@ Built by Manish Gowda N.
 ## 18. Use it as a library, jar and Maven
 
 ```
-./build-jar.sh                       # dist/minidl-1.0.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
-java -jar dist/minidl-1.0.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
+./build-jar.sh                       # dist/minidl-1.3.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
+java -jar dist/minidl-1.3.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
 ```
-In your own project, put `minidl-1.0.0.jar` on the classpath (`javac -cp minidl-1.0.0.jar MyApp.java`) and `import minidl.*;`.
+In your own project, put `minidl-1.3.0.jar` on the classpath (`javac -cp minidl-1.3.0.jar MyApp.java`) and `import minidl.*;`.
 With Maven: `mvn verify` compiles, runs the test suite and builds the jars (`pom.xml`, no dependencies); `mvn install` puts it in your local repository, then:
 ```xml
-<dependency><groupId>io.github.manishn1877</groupId><artifactId>minidl</artifactId><version>1.0.0</version></dependency>
+<dependency><groupId>io.github.manishn1877</groupId><artifactId>minidl</artifactId><version>1.2.0</version></dependency>
 ```
 Quality gates: compiles with `-Xlint:all` without a single warning, javadoc has no errors (`-Xdoclint:all,-missing`), CI runs on Java 17 and 21. Model files from outside are checked: a damaged or hostile file gives an `IOException` with a clear message, never a crash or a giant memory allocation.
 
@@ -1761,10 +1770,10 @@ Draw in the browser and the model reads it live. Pure Java on the server (the JD
 java -Xmx512m -cp out minidl.EmnistDemo emnist 8 124800 aug     # train the letters model
 ./run-web.sh letters         # letters A-Z, uses emnist-letters-cnn.bin
 ```
-Then open http://localhost:8080. The page works out by itself whether the model reads 10 digits or 26 letters.
+Then open http://localhost:8080. `./run-web.sh` loads every trained model it finds and the page has buttons to switch between **digits+letters**, **letters** and **digits**. If the digits+letters or letters model is missing, a banner says so (a digits-only model can only answer with digits, so it reads an `H` as `4`). Check the labels with your own eyes once: `java -jar dist/minidl-1.3.0.jar check-data emnist mnist`.
 
 What it does:
-- **One character or many.** "Many" mode splits the drawing by the empty gaps between characters and reads each one (`2024`, `HELLO`). Characters that touch are read as one: a known limit.
+- **One character or many.** "Many" mode finds each character as its own blob of ink, so close writing works (`2310` with 2 px between digits). Touching characters are cut at a pinch in the ink if the model reads both halves well; characters with a doubtful split show a warning mark, uncertain ones a dashed border. Limits: characters whose strokes truly overlap are often read as one (a joined `10` looks like a `0` to the model). See CHANGELOG.md.
 - **Preprocessing that matches the training data** (`DigitPreprocess`). Digits (MNIST style): crop to the ink, longer side 20 px, centre by centre of mass. Letters (EMNIST style): longer side 24 px, centred by bounding box. A 99% model reads a small or off-centre drawing badly without this. The page shows "what the model sees".
 - **Steadier answers** (`DigitRecognizer`): optional test-time augmentation averages the answer over the picture nudged 1 px in four directions.
 - **Teach it.** If it is wrong, press the right character. The model takes a few small training steps on your drawing, mixed with earlier corrections and real training pictures (so it does not forget the rest). Corrections are appended to `feedback.bin` / `feedback-letters.bin` (784 pixel bytes + 1 label byte each). "save tuned model" writes `<model>-tuned.bin`; "reset model" restores the original weights.
@@ -1778,4 +1787,67 @@ Limits: one user at a time is the intended use (corrections change the one share
 
 **Digits AND letters in one model (36 classes: 0-9, A-Z).** `./train-all.sh` also trains `alnum-cnn.bin` (`AlnumDemo`), and `./run-web.sh all` opens the page with it, so one drawing like `K7B2` is read in one go. `Alnum` puts MNIST digits and EMNIST letters into one shuffled data set, re-making every digit in the EMNIST style so the model sees one kind of picture. Pairs that look the same (0/O, 1/I, 2/Z, 5/S, 8/B) can only be guessed from the shape and the writer's habit, so expect a few more mix-ups than with the two separate models. If you know it is a number, use the digits page.
 
-Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. 29 new tests (197 total).
+Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. the full suite is 266 tests.
+
+## 19. Model server (Phase 6)
+
+Serve any saved MiniDL model over HTTP, with the ideas of the Java part of DJL Serving (analysis: `docs/DJL-ANALYSIS.md`). Pure Java, no libraries.
+
+```
+java -jar dist/minidl-1.3.0.jar serve                       # serves every *.bin in this folder
+java -jar dist/minidl-1.3.0.jar serve --port 8080 --model digits=mnist-cnn-aug.bin,batch=32,delay=5,workers=1,max_workers=4,queue=500
+curl localhost:8080/ping
+curl -X POST localhost:8080/predictions/digits -d '{"inputs": [[0.0, 0.1, ...784 numbers...]]}'
+```
+| Call | What it does |
+|---|---|
+| `GET /ping` | health |
+| `GET /models`, `GET /models/{name}` | the models; workers, queue, batch settings, request/error/rejected counts, latency p50/p99 |
+| `POST /models?url=f.bin&name=n&batch_size=16&max_batch_delay=5&min_workers=1&max_workers=4&queue_size=100` | load a model (`url` is a file NAME inside the model store folder, never a path) |
+| `PUT /models/{name}?min_workers=2&max_workers=4`, `DELETE /models/{name}` | scale, unload |
+| `POST /predictions/{name}` | body `{"inputs": [[...], ...]}` or `{"input": [...]}`; answer `{"outputs": [[...]], "argmax": [...]}` |
+| `GET /metrics` | Prometheus text: requests, errors, rejected, batches, batch rows, queue, workers, latency histogram |
+
+How it works: every worker thread owns its own copy of the model (a layer remembers its inputs, so one copy cannot be shared).
+A worker takes one request, then keeps collecting more until `batch_size` rows or `max_batch_delay` ms, stacks them into ONE matrix
+and runs ONE forward pass; each caller gets back its own rows. A full queue answers 503 at once. A bad request (wrong width, broken
+JSON) gets 400 and never disturbs the others. Safety: localhost only, 8 MB body limit, at most 10,000 rows per request.
+
+Measured here (digits model, real MNIST test images): 400 single-image requests sent in parallel were answered in 1.3 s with 99.0%
+accuracy, grouped into 38 forward passes (about 10.5 images each), p50 31 ms, p99 134 ms, none rejected. One machine, one run: a rough
+demonstration, not a benchmark. Any HTTP client works (`curl`, Java `HttpClient`).
+
+## 20. PyTorch interop in Java only: SafeTensors (Phase 6)
+
+DJL Serving runs PyTorch models by starting a Python process. MiniDL stays 100% Java instead: it reads and writes **safetensors**, the plain
+number-only file format the PyTorch world uses to share weights (`SafeTensors.java`, no code can hide in such a file). So weights trained
+elsewhere can be loaded here, and MiniDL weights can be loaded there, with no Python in this project.
+
+```java
+SafeTensors.exportModel(model, "weights.safetensors");      // MiniDL -> PyTorch names and layouts
+SafeTensors.importModel(model, "weights.safetensors");      // the other way, into a model with the SAME layers
+```
+Mapping (`i` = position of the layer in the Sequential, counting every layer; this is the index of an `nn.Sequential` built in the same order,
+without `nn.Flatten`): Dense -> `i.weight` (out, in) and `i.bias`; Conv2D -> `i.weight` (out, in/groups, k, k) and `i.bias`;
+BatchNorm2D -> `i.weight`, `i.bias`, `i.running_mean`, `i.running_var`, `i.num_batches_tracked`. Other layers with weights (LSTM, LayerNorm, attention)
+say clearly that they have no mapping yet. Every name and shape is checked on import.
+
+Tested: a file built by hand from the format description is read correctly; export then import gives identical predictions; damaged files and
+wrong shapes give clear errors (10 tests). **Not tested: a file written by real PyTorch** (PyTorch was not available when this was written); the layouts
+follow the PyTorch documentation. Try one file from your PyTorch model and tell me if a name or shape does not match.
+
+## 21. Website and GitHub Pages
+
+The handwriting page is `web/index.html`; the Java server serves it. GitHub Pages can only host files, not run Java, so on Pages the page
+**draws and the Java program on your own computer recognises**:
+1. Turn on Pages: repository Settings, Pages, branch `main`, folder `/docs`. Build the site files with `java -jar dist/minidl-1.3.0.jar site` and commit `docs/`.
+2. On your computer run `./run-web.sh` (or `java -jar dist/minidl-1.3.0.jar web`).
+3. Open the Pages address. The page finds the server at `http://localhost:8080` (or the address you type and press connect).
+
+Problems fixed in 1.3.0 (found by reading the page against how Pages works; if you saw others, tell me what you saw):
+- Every request used an absolute path (`/api/...`), which on a project page (`user.github.io/minidl-java/`) points to the wrong place. Paths are now relative.
+- A browser blocks a page from one website calling another unless the server allows it. The server now allows the project's Pages site (`-Dminidl.cors=...` to change) and answers the browser's permission check, including the one for https pages calling localhost.
+- Safety: every POST needs the header `X-MiniDL`, so a random website cannot make your browser change or save your local model; other websites get no permission at all.
+- When the server cannot be reached the page now says so, shows how to start it, and has a box to type the server address (remembered).
+- Phones: the canvas no longer scrolls the page, selects text or opens the long-press menu while drawing; keyboard shortcuts no longer fire while typing in the address box.
+Not tested in a real browser (none available here): the headers and paths are tested with an HTTP client; the page itself was only read and checked for broken references.

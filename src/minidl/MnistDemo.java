@@ -47,7 +47,7 @@ public class MnistDemo {
         }
 
         Random rnd = new Random(1);
-        Sequential m = kind.equals("mlp") ? mlp(rnd) : cnn(rnd);
+        Sequential m = kind.equals("mlp") ? mlp(rnd) : kind.equals("resnet") ? ResNet.build(1, 28, 28, 8, 1, 10, rnd) : cnn(rnd);
         System.out.print(m.summary());
         System.out.printf("weights memory: %.1f KB (float32)%n", m.weightBytes() / 1024.0);
 

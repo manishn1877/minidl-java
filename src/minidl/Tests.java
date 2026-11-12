@@ -67,6 +67,11 @@ public class Tests {
         letters();
         hostileFiles();
         alnum();
+        segmentation();
+        modelChoice();
+        serving();
+        phase4();
+        javaOnly();
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
@@ -1635,5 +1640,452 @@ public class Tests {
         Random rnd = new Random(2);
         DigitRecognizer rec = new DigitRecognizer(new Sequential().add(new Dense(784, 8, rnd)).add(new Activations.ReLU()).add(new Dense(8, 36, rnd)));
         check("recognizer: a 36-output model reads 0-9 then A-Z with EMNIST preprocessing", rec.alphabet.equals("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") && rec.style() == DigitPreprocess.Style.EMNIST);
+    }
+
+    // ---- drawing helpers for the segmentation tests: a tall bar is a "1", a ring is a "0"
+    static void bar(float[] ink, int w, int x0, int y0, int bw, int bh, double slant) {
+        for (int y = 0; y < bh; y++) { int sh = (int) Math.round(slant * (bh - y)); for (int x = 0; x < bw; x++) ink[(y0 + y) * w + x0 + x + sh] = 1f; }
+    }
+
+    static void ring(float[] ink, int w, int x0, int y0, int rw, int rh, double thick) {
+        double cx = x0 + rw / 2.0, cy = y0 + rh / 2.0, rx = rw / 2.0, ry = rh / 2.0;
+        for (int y = y0; y < y0 + rh; y++) for (int x = x0; x < x0 + rw; x++) {
+            double d = Math.pow((x + 0.5 - cx) / rx, 2) + Math.pow((y + 0.5 - cy) / ry, 2);
+            if (d <= 1.0 && d >= Math.pow(1 - thick, 2)) ink[y * w + x] = 1f;
+        }
+    }
+
+    /** A stand-in for the model: how much a picture looks like a bar ("1") or a ring ("0"), 0..1 (cosine similarity). */
+    static DigitPreprocess.Scorer barOrRing(int w, int h) {
+        float[] b = new float[w * h], r = new float[w * h];
+        bar(b, w, 10, 10, 10, 100, 0); ring(r, w, 10, 10, 90, 100, 0.2);
+        final float[] tb = DigitPreprocess.whole(b, w, h, DigitPreprocess.Style.EMNIST).pixels, tr = DigitPreprocess.whole(r, w, h, DigitPreprocess.Style.EMNIST).pixels;
+        return px -> Math.max(cos(px, tb), cos(px, tr));
+    }
+
+    static double cos(float[] a, float[] b) {
+        double d = 0, na = 0, nb = 0;
+        for (int i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+        return na == 0 || nb == 0 ? 0 : d / Math.sqrt(na * nb);
+    }
+
+    static void segmentation() {
+        final int w = 720, h = 320;
+        DigitPreprocess.Style E = DigitPreprocess.Style.EMNIST;
+        // "1" and "0" only 4 px apart: the old rule (gap of 18 px) read them as ONE shape
+        float[] a = new float[w * h];
+        bar(a, w, 100, 100, 12, 150, 0); ring(a, w, 116, 100, 110, 150, 0.2);
+        List<DigitPreprocess.Piece> p = DigitPreprocess.segment(a, w, h, E);
+        check("segment: '1' and '0' 4 px apart are two characters, left to right (" + p.size() + ")", p.size() == 2 && p.get(0).x < p.get(1).x && p.get(0).w == 12);
+        // "110"
+        float[] b = new float[w * h];
+        bar(b, w, 100, 100, 12, 150, 0); bar(b, w, 125, 100, 12, 150, 0); ring(b, w, 142, 100, 110, 150, 0.2);
+        check("segment: '110' with 4 to 5 px gaps is three characters (" + DigitPreprocess.segment(b, w, h, E).size() + ")", DigitPreprocess.segment(b, w, h, E).size() == 3);
+        // slanted "1" whose columns overlap the ring's columns but whose ink does not touch it: each piece keeps ONLY its own ink
+        float[] c = new float[w * h];
+        bar(c, w, 100, 100, 12, 150, 0.0); ring(c, w, 124, 100, 110, 150, 0.2);
+        float[] lone = new float[w * h]; bar(lone, w, 100, 100, 12, 150, 0.0);
+        List<DigitPreprocess.Piece> pc = DigitPreprocess.segment(c, w, h, E);
+        check("segment: each character gets only its own ink (left piece equals a lone bar)", pc.size() == 2 && java.util.Arrays.equals(pc.get(0).pixels, DigitPreprocess.whole(lone, w, h, E).pixels));
+        float[] sl = new float[w * h];
+        ring(sl, w, 160, 100, 110, 150, 0.2); bar(sl, w, 120, 100, 10, 150, 0.12); // slanted bar leans toward the ring: its columns reach x = 148 .. 158, inside the ring's box? no: ring starts at 160
+        List<DigitPreprocess.Piece> ps = DigitPreprocess.segment(sl, w, h, E);
+        check("segment: a slanted '1' leaning toward a '0' is still separate (" + ps.size() + ")", ps.size() == 2 && ps.get(0).x < ps.get(1).x);
+        // dot on top of a bar (like the dot of an i) joins it
+        float[] d = new float[w * h];
+        bar(d, w, 100, 140, 12, 110, 0); bar(d, w, 100, 100, 12, 14, 0);
+        check("segment: a dot above a stem is ONE character", DigitPreprocess.segment(d, w, h, E).size() == 1);
+        // a broken "0": two arcs drawn as 2 strokes (gap 3 px); the model-check joins them, without a model they stay 2
+        float[] arcs = new float[w * h];
+        ring(arcs, w, 100, 100, 110, 150, 0.2);
+        for (int y = 100; y < 250; y++) for (int x = 150; x < 154; x++) arcs[y * w + x] = 0; // cut through the middle: left arc | right arc
+        DigitPreprocess.Scorer ringOnly = barOrRing(w, h);
+        int without = DigitPreprocess.segment(arcs, w, h, E).size();
+        check("segment: a ring cut in two arcs gives 2 blobs without the model (" + without + ")", without == 2);
+        // touching "1" + "0" (the bar's edge kisses the ring): cut with the model's help
+        float[] t = new float[w * h];
+        bar(t, w, 100, 100, 12, 150, 0); ring(t, w, 112, 100, 150, 150, 0.2);
+        List<DigitPreprocess.Piece> pt = DigitPreprocess.segment(t, w, h, E, ringOnly);
+        check("segment: touching '1' + '0' are cut into 2, left to right, with a note (" + pt.size() + ")",
+            pt.size() == 2 && pt.get(0).x < pt.get(1).x && pt.get(0).note != null && pt.get(0).w <= 14);
+        check("segment: touching '1' + '0' stay one without a model (it cannot know)", DigitPreprocess.segment(t, w, h, E).size() == 1);
+        // a single ring and a single "8" (two touching rings) must NOT be cut
+        float[] z = new float[w * h]; ring(z, w, 100, 100, 150, 150, 0.2);
+        check("segment: a lone '0' is not cut", DigitPreprocess.segment(z, w, h, E, ringOnly).size() == 1);
+        float[] e8 = new float[w * h]; ring(e8, w, 100, 100, 80, 80, 0.25); ring(e8, w, 98, 172, 84, 80, 0.25);
+        check("segment: a lone '8' is not cut", DigitPreprocess.segment(e8, w, h, E, ringOnly).size() == 1);
+        // many characters keep their left-to-right order
+        float[] many = new float[w * h];
+        int x = 30; for (int i = 0; i < 6; i++) { ring(many, w, x, 100, 80, 120, 0.25); x += 95; }
+        List<DigitPreprocess.Piece> pm = DigitPreprocess.segment(many, w, h, E, ringOnly);
+        boolean ordered = pm.size() == 6;
+        for (int i = 1; i < pm.size(); i++) ordered &= pm.get(i).x > pm.get(i - 1).x;
+        check("segment: 6 characters, 15 px apart, come out in order (" + pm.size() + ")", ordered);
+        // the same character drawn small/large and in different places gives (nearly) the same 28 x 28 input
+        float[] big = new float[w * h], small = new float[w * h];
+        ring(big, w, 300, 40, 160, 240, 0.2); ring(small, w, 50, 200, 40, 60, 0.2);
+        double sim = cos(DigitPreprocess.whole(big, w, h, E).pixels, DigitPreprocess.whole(small, w, h, E).pixels);
+        check("preprocess: the same shape drawn big and small gives (nearly) the same input, cosine " + String.format("%.3f", sim), sim > 0.95);
+    }
+
+    /** Class numbers -> characters, and which model the server picks. */
+    static void modelChoice() throws Exception {
+        check("alphabet: class 0..9 are '0'..'9', 10 is 'A', 35 is 'Z'", Alnum.CHARS.charAt(0) == '0' && Alnum.CHARS.charAt(9) == '9' && Alnum.CHARS.charAt(10) == 'A' && Alnum.CHARS.charAt(35) == 'Z' && Alnum.CHARS.length() == 36);
+        check("alphabet: EMNIST letters class 0 is 'A', 25 is 'Z'", EmnistLoader.LETTERS.charAt(0) == 'A' && EmnistLoader.LETTERS.charAt(25) == 'Z' && EmnistLoader.LETTERS.length() == 26);
+        Random rnd = new Random(9);
+        HandwritingServer.slots.clear();
+        int[] sizes = {10, 26, 36};
+        for (int n : sizes) {
+            File f = File.createTempFile("m" + n, ".bin");
+            ModelIO.saveBinary(new Sequential().add(new Dense(784, 6, rnd)).add(new Activations.ReLU()).add(new Dense(6, n, rnd)), f.getPath());
+            HandwritingServer.addSlot(f.getPath());
+            f.delete();
+        }
+        check("server: models are filed by size: 36 = all, 26 = letters, 10 = digits (" + HandwritingServer.slots.keySet() + ")",
+            HandwritingServer.slots.keySet().equals(new java.util.LinkedHashSet<>(java.util.Arrays.asList("digits", "letters", "all"))));
+        HandwritingServer.Slot all = HandwritingServer.slots.get("all"), dig = HandwritingServer.slots.get("digits");
+        float[] px = new float[784];
+        double[] pr = new double[36]; pr[10] = 1;
+        DigitPreprocess.Piece piece = DigitPreprocess.whole(blobImage(), 100, 100, DigitPreprocess.Style.EMNIST);
+        String j36 = HandwritingServer.digitJson(all, piece, resultFor(pr));
+        check("server: class 10 of the 36-class model is shown as 'A'", j36.contains("\"ch\":\"A\"") && j36.contains("\"label\":10"));
+        pr = new double[36]; pr[35] = 1;
+        check("server: class 35 is shown as 'Z'", HandwritingServer.digitJson(all, piece, resultFor(pr)).contains("\"ch\":\"Z\""));
+        double[] p10 = new double[10]; p10[7] = 1;
+        check("server: class 7 of the digits model is shown as '7'", HandwritingServer.digitJson(dig, piece, resultFor(p10)).contains("\"ch\":\"7\""));
+        HandwritingServer.slots.clear();
+    }
+
+    static float[] blobImage() { float[] f = new float[100 * 100]; for (int y = 20; y < 80; y++) for (int x = 40; x < 60; x++) f[y * 100 + x] = 1f; return f; }
+
+    static DigitRecognizer.Result resultFor(double[] probs) {
+        try { java.lang.reflect.Constructor<DigitRecognizer.Result> c = DigitRecognizer.Result.class.getDeclaredConstructor(double[].class); c.setAccessible(true); return c.newInstance((Object) probs); }
+        catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    // ---------------------------------------------------------------- serving (DJL-style model server)
+    static File tinyModelDir() throws Exception {
+        File dir = java.nio.file.Files.createTempDirectory("minidl-store").toFile();
+        Random rnd = new Random(5);
+        ModelIO.saveBinary(new Sequential().add(new Dense(4, 8, rnd)).add(new Activations.ReLU()).add(new Dense(8, 3, rnd)), new File(dir, "tiny.bin").getPath());
+        ModelIO.saveBinary(new Sequential().add(new Dense(2000, 2000, rnd)).add(new Activations.ReLU()).add(new Dense(2000, 2, rnd)), new File(dir, "slow.bin").getPath());
+        return dir;
+    }
+
+    static float[] direct(File model, float[] row) throws Exception {
+        Sequential m = ModelIO.loadModelBinary(model.getPath(), new Random(1));
+        Tensor x = new Tensor(1, row.length);
+        System.arraycopy(row, 0, x.data, 0, row.length);
+        Tensor o = m.predict(x);
+        float[] r = new float[o.cols];
+        for (int c = 0; c < o.cols; c++) r[c] = (float) o.get(0, c);
+        return r;
+    }
+
+    static void serving() throws Exception {
+        File dir = tinyModelDir(), tiny = new File(dir, "tiny.bin");
+        Random rnd = new Random(8);
+
+        // 1. dynamic batching: 8 single-row requests that arrive together are answered by (about) ONE forward pass, each caller gets ITS row
+        ModelPool.Config c = new ModelPool.Config();
+        c.name = "tiny"; c.file = tiny.getPath(); c.batchSize = 8; c.maxBatchDelayMs = 300;
+        ModelPool pool = new ModelPool(c);
+        List<float[]> in = new ArrayList<>();
+        List<java.util.concurrent.CompletableFuture<float[][]>> fs = new ArrayList<>();
+        for (int i = 0; i < 8; i++) { float[] row = new float[4]; for (int k = 0; k < 4; k++) row[k] = (float) rnd.nextGaussian(); in.add(row); fs.add(pool.submit(new float[][]{row})); }
+        boolean same = true;
+        for (int i = 0; i < 8; i++) { float[] got = fs.get(i).get(10, java.util.concurrent.TimeUnit.SECONDS)[0], want = direct(tiny, in.get(i)); for (int k = 0; k < 3; k++) same &= Math.abs(got[k] - want[k]) < 1e-5; }
+        check("serving: 8 requests are answered in " + pool.stats.batches.get() + " forward pass(es), each caller gets its own correct row", pool.stats.batches.get() <= 2 && same && pool.stats.batchRows.get() == 8);
+
+        // 2. one bad request fails alone: wrong width is refused, the good ones in the same moment are fine
+        java.util.concurrent.CompletableFuture<float[][]> good1 = pool.submit(new float[][]{in.get(0)}), bad = pool.submit(new float[][]{new float[5]}), good2 = pool.submit(new float[][]{in.get(1)});
+        boolean badFailed = false;
+        try { bad.get(10, java.util.concurrent.TimeUnit.SECONDS); } catch (java.util.concurrent.ExecutionException e) { badFailed = true; }
+        check("serving: a request with the wrong width fails alone, the others still succeed", badFailed && good1.get(10, java.util.concurrent.TimeUnit.SECONDS).length == 1 && good2.get(10, java.util.concurrent.TimeUnit.SECONDS).length == 1);
+
+        // 3. scaling
+        pool.scale(3, 3);
+        boolean up = pool.workers() == 3;
+        pool.scale(1, 1);
+        check("serving: scale up to 3 workers and back down to 1", up && pool.workers() == 1);
+        pool.close();
+
+        // 4. a full queue refuses at once (no waiting, no memory growth)
+        ModelPool.Config sc = new ModelPool.Config();
+        sc.name = "slow"; sc.file = new File(dir, "slow.bin").getPath(); sc.batchSize = 1; sc.maxBatchDelayMs = 0; sc.queueSize = 1;
+        ModelPool slow = new ModelPool(sc);
+        List<java.util.concurrent.CompletableFuture<float[][]>> many = new ArrayList<>();
+        for (int i = 0; i < 100; i++) many.add(slow.submit(new float[][]{new float[2000]}));
+        int ok = 0, refused = 0;
+        for (java.util.concurrent.CompletableFuture<float[][]> f : many) {
+            try { f.get(60, java.util.concurrent.TimeUnit.SECONDS); ok++; }
+            catch (java.util.concurrent.ExecutionException e) { if (e.getCause() instanceof ModelPool.CapacityException) refused++; }
+        }
+        check("serving: queue of 1 with a slow model: " + ok + " answered, " + refused + " refused at once, none lost", refused > 0 && ok >= 1 && ok + refused == 100 && slow.stats.rejected.get() == refused);
+        slow.close();
+
+        // 5. request parsing
+        check("serving: JSON inputs: rows, one row, bare array", ModelServer.parseRows("{\"inputs\":[[1,2],[3,4]]}").length == 2 && ModelServer.parseRows("{\"input\":[1,2,3]}")[0].length == 3 && ModelServer.parseRows("[[0.5,-1e2]]")[0][1] == -100f);
+        int bad2 = 0;
+        for (String b : new String[]{"{\"inputs\":[[1,2],[3]]}", "{\"inputs\":[]}", "{\"inputs\":[[1,\"x\"]]}", "{\"foo\":1}", "[1,2", "not json", "{\"inputs\":[[1,2]]} trailing"}) {
+            try { ModelServer.parseRows(b); } catch (IllegalArgumentException e) { bad2++; }
+        }
+        check("serving: 7 kinds of broken input are refused with a clear error (" + bad2 + "/7)", bad2 == 7);
+
+        // 6. the HTTP API, end to end
+        ModelServer srv = new ModelServer(dir);
+        srv.start(0);
+        try {
+            String base = "http://127.0.0.1:" + srv.port();
+            java.net.http.HttpClient hc = java.net.http.HttpClient.newHttpClient();
+            java.util.function.BiFunction<String, String[], String[]> call = (method, a) -> { // a = {path, body or null}
+                try {
+                    java.net.http.HttpRequest.Builder b = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + a[0]));
+                    b.method(method, a[1] == null ? java.net.http.HttpRequest.BodyPublishers.noBody() : java.net.http.HttpRequest.BodyPublishers.ofString(a[1]));
+                    java.net.http.HttpResponse<String> r = hc.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+                    return new String[]{String.valueOf(r.statusCode()), r.body()};
+                } catch (Exception e) { throw new RuntimeException(e); }
+            };
+            check("http: GET /ping says Healthy", call.apply("GET", new String[]{"/ping", null})[1].contains("Healthy"));
+            check("http: register a model -> 201", call.apply("POST", new String[]{"/models?url=tiny.bin&name=tiny&batch_size=4&max_batch_delay=2", null})[0].equals("201"));
+            check("http: registering the same name again -> 409", call.apply("POST", new String[]{"/models?url=tiny.bin&name=tiny", null})[0].equals("409"));
+            int refusedPaths = 0;
+            for (String u : new String[]{"../tiny.bin", "%2Fetc%2Fpasswd", "..%2Ftiny.bin", "sub%5Ctiny.bin", "missing.bin", ".hidden.bin", "tiny.txt"})
+                if (call.apply("POST", new String[]{"/models?url=" + u + "&name=evil", null})[0].equals("400")) refusedPaths++;
+            check("http: paths outside the model store, missing files and wrong types are refused with 400 (" + refusedPaths + "/7)", refusedPaths == 7);
+            check("http: a bad model name is refused", call.apply("POST", new String[]{"/models?url=tiny.bin&name=a%2Fb", null})[0].equals("400"));
+            float[] r0 = {0.5f, -1f, 2f, 0.25f}, r1 = {1f, 1f, -1f, 0f};
+            String[] resp = call.apply("POST", new String[]{"/predictions/tiny", "{\"inputs\":[[0.5,-1,2,0.25],[1,1,-1,0]]}"});
+            java.util.Map<?, ?> js = (java.util.Map<?, ?>) MiniJson.parse(resp[1]);
+            List<?> outs = (List<?>) js.get("outputs");
+            boolean eq = resp[0].equals("200");
+            float[][] want = {direct(tiny, r0), direct(tiny, r1)};
+            for (int r = 0; eq && r < 2; r++) for (int k = 0; k < 3; k++) eq &= Math.abs(((Number) ((List<?>) outs.get(r)).get(k)).doubleValue() - want[r][k]) < 1e-5;
+            check("http: POST /predictions/tiny returns the same numbers as the model run directly, plus argmax", eq && ((List<?>) js.get("argmax")).size() == 2);
+            check("http: wrong width -> 400 (not 500)", call.apply("POST", new String[]{"/predictions/tiny", "{\"input\":[1,2,3]}"})[0].equals("400"));
+            check("http: broken JSON -> 400", call.apply("POST", new String[]{"/predictions/tiny", "{oops"})[0].equals("400"));
+            check("http: GET on predictions -> 405, unknown model -> 404", call.apply("GET", new String[]{"/predictions/tiny", null})[0].equals("405") && call.apply("POST", new String[]{"/predictions/nope", "{\"input\":[1]}"})[0].equals("404"));
+            // 30 requests at once from 30 threads, every answer must be the right one
+            java.util.concurrent.atomic.AtomicInteger good = new java.util.concurrent.atomic.AtomicInteger();
+            List<Thread> ts = new ArrayList<>();
+            for (int t = 0; t < 30; t++) {
+                final int seed = t;
+                Thread th = new Thread(() -> {
+                    try {
+                        float[] row = {seed, -seed / 2f, 1f, 0.1f * seed};
+                        String[] rs = call.apply("POST", new String[]{"/predictions/tiny", "{\"input\":[" + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "]}"});
+                        float[] w = direct(tiny, row);
+                        List<?> o = (List<?>) ((List<?>) ((java.util.Map<?, ?>) MiniJson.parse(rs[1])).get("outputs")).get(0);
+                        boolean okk = rs[0].equals("200");
+                        for (int k = 0; k < 3; k++) okk &= Math.abs(((Number) o.get(k)).doubleValue() - w[k]) < 1e-4;
+                        if (okk) good.incrementAndGet();
+                    } catch (Exception e) { /* counted as not good */ }
+                });
+                ts.add(th); th.start();
+            }
+            for (Thread th : ts) th.join();
+            check("http: 30 parallel requests, all answered correctly (" + good.get() + "/30)", good.get() == 30);
+            String info = call.apply("GET", new String[]{"/models/tiny", null})[1];
+            java.util.Map<?, ?> im = (java.util.Map<?, ?>) MiniJson.parse(info);
+            check("http: /models/tiny reports the request count (1 + 1 wrong width + 30 parallel = 32) and latency percentiles", ((Number) im.get("requests")).intValue() == 32 && im.get("latencyMs") instanceof java.util.Map);
+            String met = call.apply("GET", new String[]{"/metrics", null})[1];
+            check("http: /metrics is Prometheus text with counters, gauges and a latency histogram", met.contains("minidl_requests_total{model=\"tiny\"}") && met.contains("# TYPE minidl_request_latency_seconds histogram") && met.contains("le=\"+Inf\"") && met.contains("minidl_workers{model=\"tiny\"} 1"));
+            check("http: scale with PUT", call.apply("PUT", new String[]{"/models/tiny?min_workers=2&max_workers=2", null})[0].equals("200") && srv.pool("tiny").workers() == 2);
+            check("http: list shows the model", call.apply("GET", new String[]{"/models", null})[1].contains("\"modelName\":\"tiny\""));
+            check("http: DELETE unloads it; then predict -> 404", call.apply("DELETE", new String[]{"/models/tiny", null})[0].equals("200") && call.apply("POST", new String[]{"/predictions/tiny", "{\"input\":[1,2,3,4]}"})[0].equals("404"));
+        } finally { srv.stop(); }
+    }
+
+    // ---------------------------------------------------------------- phase 4: BatchNorm2D, LSTM, ResNet, BPE tokenizer
+    static void phase4() throws Exception {
+        Random r = new Random(21);
+        Tensor x = Tensor.randn(4, 16, 1.0, r), y = Tensor.randn(4, 2, 1.0, r);
+
+        Sequential bn = new Sequential().add(new Conv2D(1, 4, 4, 2, 3, 1, 1, r)).add(new BatchNorm2D(2, 4, 4)).add(new Activations.Tanh()).add(new Dense(32, 2, r));
+        check("gradcheck BatchNorm2D (training mode, per-channel statistics)", GradCheck.maxRelativeError(bn, new Losses.MSE(), x, y) < GC_TOL_DEEP);
+        BatchNorm2D b2 = new BatchNorm2D(3, 2, 2);
+        Tensor img = Tensor.randn(5, 12, 3.0, r);
+        for (int i = 0; i < img.data.length; i++) img.data[i] += (i % 12) / 4 * 10f; // different mean per channel
+        Tensor o2 = b2.forward(img);
+        double worst = 0;
+        for (int c = 0; c < 3; c++) {
+            double m = 0, v = 0; int cnt = 0;
+            for (int i = 0; i < 5; i++) for (int p = 0; p < 4; p++) { m += o2.data[i * 12 + c * 4 + p]; cnt++; }
+            m /= cnt;
+            for (int i = 0; i < 5; i++) for (int p = 0; p < 4; p++) { double d = o2.data[i * 12 + c * 4 + p] - m; v += d * d; }
+            worst = Math.max(worst, Math.max(Math.abs(m), Math.abs(Math.sqrt(v / cnt) - 1)));
+        }
+        check("BatchNorm2D: every channel ends with mean 0 and std 1 over (batch, y, x), worst deviation " + String.format("%.4f", worst), worst < 1e-3);
+
+        // LSTM
+        Sequential l1 = new Sequential().add(new LSTM(3, 2, 4, false, r)).add(new Dense(4, 2, r));
+        Tensor xs = Tensor.randn(4, 6, 1.0, r);
+        check("gradcheck LSTM (last hidden state, BPTT over 3 steps)", GradCheck.maxRelativeError(l1, new Losses.MSE(), xs, y) < GC_TOL_DEEP);
+        Sequential l2 = new Sequential().add(new LSTM(3, 2, 3, true, r)).add(new Dense(9, 2, r));
+        check("gradcheck LSTM (return every step)", GradCheck.maxRelativeError(l2, new Losses.MSE(), xs, y) < GC_TOL_DEEP);
+        // a task that needs memory: is the FIRST number of a 6-step sequence positive? (the last steps are noise)
+        int N = 600, T = 6;
+        Tensor tx = Tensor.randn(N, T, 1.0, r), ty = new Tensor(N, 2);
+        for (int i = 0; i < N; i++) ty.data[i * 2 + (tx.data[i * T] > 0 ? 1 : 0)] = 1f;
+        Sequential mem = new Sequential().add(new LSTM(T, 1, 12, false, new Random(3))).add(new Dense(12, 2, new Random(4)));
+        mem.fit(tx, ty, new Losses.SoftmaxCrossEntropy(), new Optimizers.Adam(0.02), 80, 32, 0, 0);
+        Tensor vx = Tensor.randn(300, T, 1.0, new Random(99)), vy = new Tensor(300, 2);
+        for (int i = 0; i < 300; i++) vy.data[i * 2 + (vx.data[i * T] > 0 ? 1 : 0)] = 1f;
+        double acc = mem.accuracy(vx, vy);
+        check("LSTM learns to remember: sign of the first of 6 numbers, accuracy on new data " + String.format("%.1f%%", acc), acc > 90);
+
+        // ResNet. The gradient check uses tanh (smooth): ReLU has kinks that fool finite differences (not a bug in backward).
+        Sequential smooth = new Sequential().add(new Conv2D(1, 8, 8, 2, 3, 1, 1, r)).add(new BatchNorm2D(2, 8, 8)).add(new Activations.Tanh())
+            .add(new Residual(new Conv2D(2, 8, 8, 2, 3, 1, 1, r), new BatchNorm2D(2, 8, 8), new Activations.Tanh(), new Conv2D(2, 8, 8, 2, 3, 1, 1, r), new BatchNorm2D(2, 8, 8))).add(new Activations.Tanh())
+            .add(new Conv2D(2, 8, 8, 4, 3, 2, 1, r)).add(new BatchNorm2D(4, 4, 4)).add(new Activations.Tanh()).add(new AvgPool2D(4, 4, 4, 4)).add(new Dense(4, 3, r));
+        Tensor rx = Tensor.randn(6, 64, 1.0, r), ry = Tensor.randn(6, 3, 1.0, r);
+        check("gradcheck ResNet-style stack (Conv, BatchNorm2D, Residual, stride 2, AvgPool, Dense)", GradCheck.maxRelativeError(smooth, new Losses.MSE(), rx, ry) < GC_TOL_DEEP);
+        Sequential rn = ResNet.build(1, 8, 8, 4, 1, 3, new Random(31));
+        Tensor tx8 = Tensor.randn(16, 64, 1.0, r), ty8 = Tensor.randn(16, 3, 1.0, r);
+        double rl0 = new Losses.MSE().forward(rn.predict(tx8), ty8);
+        rn.fit(tx8, ty8, new Losses.MSE(), new Optimizers.Adam(0.01), 80, 8, 0, 0);
+        rn.setTraining(false);
+        double rl1 = new Losses.MSE().forward(rn.predict(tx8), ty8);
+        check("ResNet.build (ReLU) trains: loss on 16 examples " + String.format("%.3f -> %.3f", rl0, rl1), rl1 < 0.5 * rl0);
+        File f = File.createTempFile("resnet", ".bin");
+        Tensor rx2 = Tensor.randn(3, 64, 1.0, r);
+        Tensor before = rn.predict(rx2);
+        ModelIO.saveBinary(rn, f.getPath());
+        Tensor after = ModelIO.loadModelBinary(f.getPath(), new Random(1)).predict(rx2);
+        double diff = 0;
+        for (int i = 0; i < before.data.length; i++) diff = Math.max(diff, Math.abs(before.data[i] - after.data[i]));
+        check("ResNet save + load gives identical predictions (BatchNorm2D running stats kept), max diff " + diff, diff < 1e-6);
+        f.delete();
+        boolean refused = false;
+        try { ResNet.build(1, 10, 10, 2, 1, 3, r); } catch (IllegalArgumentException e) { refused = true; }
+        check("ResNet refuses a picture size that is not divisible by 4", refused);
+
+        // BPE tokenizer
+        String text = "the cat sat on the mat. the cat ate the rat. a cat and a rat sat on the mat.\nthe end of the story.";
+        BpeTokenizer tk = BpeTokenizer.train(text, 60);
+        int[] ids = tk.encode(text);
+        check("BPE: decode(encode(text)) gives the text back exactly", tk.decode(ids).equals(text));
+        check("BPE: merges make the text shorter than one token per character (" + ids.length + " tokens for " + text.length() + " characters), vocabulary " + tk.vocabSize(), ids.length < text.length() * 0.6 && tk.vocabSize() <= 60);
+        check("BPE: a frequent word is ONE token", tk.encode(" the").length == 1 && tk.encode(" cat").length == 1);
+        int[] unseen = tk.encode("the Zebra");
+        check("BPE: an unseen character becomes the unknown token, the rest still works", java.util.Arrays.stream(unseen).anyMatch(v -> v == BpeTokenizer.UNKNOWN) && tk.decode(unseen).startsWith("the "));
+        File tf = File.createTempFile("bpe", ".txt");
+        tk.save(tf.getPath());
+        BpeTokenizer tk2 = BpeTokenizer.load(tf.getPath());
+        check("BPE: save + load gives the same tokens", java.util.Arrays.equals(tk2.encode(text), ids) && tk2.vocabSize() == tk.vocabSize());
+        tf.delete();
+        boolean badId = false;
+        try { tk.decode(new int[]{9999}); } catch (IllegalArgumentException e) { badId = true; }
+        check("BPE: an id outside the vocabulary gives a clear error", badId);
+    }
+
+    // ---------------------------------------------------------------- Java-only tools: SafeTensors, Plot, TokenSource, web server safety
+    static void javaOnly() throws Exception {
+        // 1. a safetensors file built BY HAND from the format description (header length, JSON header, little-endian floats)
+        String hdr = "{\"__metadata__\":{\"format\":\"pt\"},\"a\":{\"dtype\":\"F32\",\"shape\":[2,2],\"data_offsets\":[0,16]},\"n\":{\"dtype\":\"I64\",\"shape\":[],\"data_offsets\":[16,24]}}";
+        while (hdr.length() % 8 != 0) hdr += " ";
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(8 + hdr.length() + 24).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        bb.putLong(hdr.length()).put(hdr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        bb.putFloat(1f).putFloat(2f).putFloat(3f).putFloat(4f).putLong(7);
+        File hand = File.createTempFile("hand", ".safetensors");
+        java.nio.file.Files.write(hand.toPath(), bb.array());
+        java.util.Map<String, SafeTensors.Entry> got = SafeTensors.read(hand.getPath());
+        float[] a = got.get("a").floats();
+        check("safetensors: a file written by hand from the format description is read correctly (shape, values, I64 kept, metadata ignored)",
+            got.size() == 2 && java.util.Arrays.equals(got.get("a").shape, new long[]{2, 2}) && a[0] == 1f && a[3] == 4f && got.get("n").raw.length == 8);
+        byte[] bad = bb.array().clone();
+        bad[8 + hdr.indexOf("[0,16]") + 4] = '9'; // offsets now point outside the file
+        java.nio.file.Files.write(hand.toPath(), bad);
+        String why = "";
+        try { SafeTensors.read(hand.getPath()); } catch (IOException e) { why = e.getMessage(); }
+        check("safetensors: offsets that point outside the file give a clear error", why.contains("outside") || why.contains("does not fit"));
+        java.nio.file.Files.write(hand.toPath(), new byte[]{1, 2, 3});
+        why = "";
+        try { SafeTensors.read(hand.getPath()); } catch (IOException e) { why = e.getMessage(); }
+        check("safetensors: a too short file gives a clear error", why.contains("too short"));
+        hand.delete();
+
+        // 2. model <-> PyTorch layout round trip
+        Random r = new Random(14);
+        Sequential src = new Sequential().add(new Conv2D(1, 4, 4, 2, 3, 1, 0, r)).add(new BatchNorm2D(2, 2, 2)).add(new Activations.ReLU()).add(new Dense(8, 3, r));
+        Tensor warm = Tensor.randn(6, 16, 1.0, r);
+        src.predict(warm); src.forward(warm); // moves the BatchNorm running statistics away from 0/1
+        src.setTraining(false);
+        Tensor want = src.predict(warm);
+        File st = File.createTempFile("model", ".safetensors");
+        SafeTensors.exportModel(src, st.getPath());
+        java.util.Map<String, SafeTensors.Entry> ex = SafeTensors.read(st.getPath());
+        Tensor dw = src.layers().get(3).params().get(0).value; // MiniDL Dense weight (in=8, out=3)
+        float[] exported = ex.get("3.weight").floats();
+        check("safetensors export: Dense weight is (out, in) = [3, 8] and transposed, Conv2D weight is [2, 1, 3, 3], BatchNorm has the 5 PyTorch tensors",
+            java.util.Arrays.equals(ex.get("3.weight").shape, new long[]{3, 8}) && exported[2 * 8 + 5] == dw.data[5 * 3 + 2] && java.util.Arrays.equals(ex.get("0.weight").shape, new long[]{2, 1, 3, 3})
+            && ex.containsKey("1.running_mean") && ex.containsKey("1.running_var") && ex.containsKey("1.num_batches_tracked") && ex.get("1.num_batches_tracked").dtype.equals("I64"));
+        Sequential dst = new Sequential().add(new Conv2D(1, 4, 4, 2, 3, 1, 0, new Random(99))).add(new BatchNorm2D(2, 2, 2)).add(new Activations.ReLU()).add(new Dense(8, 3, new Random(98)));
+        dst.setTraining(false);
+        SafeTensors.importModel(dst, st.getPath());
+        Tensor have = dst.predict(warm);
+        double d = 0;
+        for (int i = 0; i < want.data.length; i++) d = Math.max(d, Math.abs(want.data[i] - have.data[i]));
+        check("safetensors: export then import into a freshly initialised model gives identical predictions, max diff " + d, d < 1e-6);
+        Sequential wrongShape = new Sequential().add(new Conv2D(1, 4, 4, 2, 3, 1, 0, r)).add(new BatchNorm2D(2, 2, 2)).add(new Activations.ReLU()).add(new Dense(8, 4, r));
+        why = "";
+        try { SafeTensors.importModel(wrongShape, st.getPath()); } catch (IOException e) { why = e.getMessage(); }
+        check("safetensors: importing into a model with different sizes names the tensor and both shapes", why.contains("3.weight") && why.contains("shape"));
+        Sequential lstm = new Sequential().add(new LSTM(3, 2, 4, false, r));
+        why = "";
+        try { SafeTensors.exportModel(lstm, st.getPath()); } catch (IOException e) { why = e.getMessage(); }
+        check("safetensors: a layer without a mapping says so instead of writing wrong weights", why.contains("LSTM"));
+        st.delete();
+
+        // 3. Plot: SVG is valid XML with the right number of curves and points
+        String log = "train 54000\nepoch    1  loss 0.42741  val 0.07573\nnoise\nepoch    2  loss 0.18905  val 0.06626\nepoch    3  loss 0.14079  val 0.05357\n";
+        Plot.Series ps = Plot.parseLog("run", log);
+        String svg = Plot.svg(java.util.Arrays.asList(ps, ps), "t <&> \"x\"");
+        org.w3c.dom.Document doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new java.io.ByteArrayInputStream(svg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        check("plot: 3 epochs parsed from a log with other lines; SVG is well-formed XML with 2 charts x 2 curves x 3 points",
+            ps.epoch.size() == 3 && doc.getElementsByTagName("polyline").getLength() == 4 && doc.getElementsByTagName("circle").getLength() == 12);
+
+        // 4. TokenSource windows
+        TokenSource ts = TokenSource.of(new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 10, 3);
+        Tensor tf = ts.features(new int[]{0, 2}, 0, 2), tt = ts.targets(new int[]{0, 2}, 0, 2);
+        check("TokenSource: 10 tokens, window 3 -> 6 examples; example 2 reads 2,3,4 and must predict 3,4,5", ts.size() == 6 && tf.get(1, 0) == 2 && tf.get(1, 2) == 4 && tt.get(3 + 0, 3) == 1 && tt.get(3 + 2, 5) == 1 && tt.rows == 6);
+        TokenSource view = ts.view(2, 5);
+        check("TokenSource: a view starts at the right place", view.size() == 3 && view.features(new int[]{0}, 0, 1).get(0, 0) == 2);
+
+        // 5. web server: which websites may call it, and the safety header
+        File dir = File.createTempFile("webm", "");
+        dir.delete(); dir.mkdir();
+        File tiny = new File(dir, "mnist-cnn.bin");
+        ModelIO.saveBinary(new Sequential().add(new Dense(784, 6, r)).add(new Activations.ReLU()).add(new Dense(6, 10, r)), tiny.getPath());
+        HandwritingServer.slots.clear();
+        HandwritingServer.addSlot(tiny.getPath());
+        HandwritingServer.defaultKey = "digits";
+        com.sun.net.httpserver.HttpServer web = HandwritingServer.startHttp(0);
+        try {
+            String base = "http://127.0.0.1:" + web.getAddress().getPort();
+            java.net.http.HttpClient hc = java.net.http.HttpClient.newHttpClient();
+            final String ok = "https://manishn1877.github.io", evil = "https://evil.example";
+            java.util.function.Function<String[], java.net.http.HttpResponse<String>> call = q -> { // method, path, origin|null, withHeader(1/0), body|null
+                try {
+                    java.net.http.HttpRequest.Builder b = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + q[1]));
+                    if (q[2] != null) b.header("Origin", q[2]);
+                    if (q[3].equals("1")) b.header("X-MiniDL", "1");
+                    b.method(q[0], q[4] == null ? java.net.http.HttpRequest.BodyPublishers.noBody() : java.net.http.HttpRequest.BodyPublishers.ofByteArray(new byte[16 * 16]));
+                    return hc.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+                } catch (Exception e) { throw new RuntimeException(e); }
+            };
+            java.net.http.HttpResponse<String> g1 = call.apply(new String[]{"GET", "/api/info", ok, "0", null});
+            check("web: an allowed website (the GitHub Pages one) gets the cross-origin headers, including the private-network one",
+                g1.statusCode() == 200 && ok.equals(g1.headers().firstValue("Access-Control-Allow-Origin").orElse("")) && g1.headers().firstValue("Access-Control-Allow-Private-Network").orElse("").equals("true"));
+            java.net.http.HttpResponse<String> g2 = call.apply(new String[]{"GET", "/api/info", evil, "0", null});
+            check("web: any other website gets NO cross-origin permission", g2.statusCode() == 200 && g2.headers().firstValue("Access-Control-Allow-Origin").isEmpty());
+            check("web: preflight (OPTIONS) is answered 204 for the allowed website and 403 for others",
+                call.apply(new String[]{"OPTIONS", "/api/predict", ok, "0", null}).statusCode() == 204 && call.apply(new String[]{"OPTIONS", "/api/predict", evil, "0", null}).statusCode() == 403);
+            check("web: a POST without the X-MiniDL header is refused (403) for learn, save and reset too",
+                call.apply(new String[]{"POST", "/api/predict?w=16&h=16", null, "0", "x"}).statusCode() == 403 && call.apply(new String[]{"POST", "/api/learn?w=16&h=16&label=1", evil, "0", "x"}).statusCode() == 403
+                && call.apply(new String[]{"POST", "/api/save", evil, "0", null}).statusCode() == 403 && call.apply(new String[]{"POST", "/api/reset", evil, "0", null}).statusCode() == 403);
+            java.net.http.HttpResponse<String> p = call.apply(new String[]{"POST", "/api/predict?w=16&h=16&mode=single", ok, "1", "x"});
+            check("web: a POST with the header works (a blank canvas gives no digits)", p.statusCode() == 200 && p.body().contains("\"digits\":[]"));
+        } finally { web.stop(0); HandwritingServer.slots.clear(); tiny.delete(); dir.delete(); }
     }
 }

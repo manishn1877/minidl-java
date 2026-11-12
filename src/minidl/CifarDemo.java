@@ -35,7 +35,7 @@ public class CifarDemo {
         System.out.printf("train %d, validation %d, test %d  (images kept as bytes: %.0f MB; as double they would be %.0f MB)%n",
             nTrain, nVal, tst.size(), (all.bytes() + tst.bytes()) / 1e6, (all.size() + tst.size()) * 3072 * 8.0 / 1e6);
 
-        Sequential m = cnn(new Random(1));
+        Sequential m = args.length > 4 && args[4].equals("resnet") ? ResNet.build(3, 32, 32, 16, 2, 10, new Random(1)) : cnn(new Random(1)); // 5th argument "resnet": ResNet-style model (not trained here: CIFAR data was not available)
         System.out.print(m.summary(3, 32, 32));        // shapes are checked here, before any training
         DataSource trainSrc = aug ? new AugmentedSource(train, 3, 32, 32, 3, 0, true, 5) : train;
         if (aug) System.out.println("data augmentation ON (random shift up to 3 px + random left-right flip)");

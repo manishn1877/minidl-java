@@ -1,16 +1,19 @@
 #!/bin/sh
-# Handwriting recognition web app. Needs JDK 17+ and a trained model.
-#   ./run-web.sh                digits, using mnist-cnn-aug.bin or mnist-cnn.bin (made by MnistDemo)
-#   ./run-web.sh letters        letters A-Z, using emnist-letters-cnn.bin (made by EmnistDemo)
-#   ./run-web.sh all            digits AND letters in one model, using alnum-cnn.bin (made by AlnumDemo)
-#   ./run-web.sh digits 9000    different port
-# If ./mnist (or ./emnist) exists, the page also shows test accuracy and corrections are mixed with real data.
+# Handwriting recognition web app. Needs JDK 17+ and trained models.
+#   ./run-web.sh                loads EVERY trained model it finds (alnum-cnn.bin, emnist-letters-cnn.bin, mnist-cnn-aug.bin)
+#                               and the page lets you switch between them. It opens with digits+letters if you trained it.
+#   ./run-web.sh digits         only the digits model        ./run-web.sh letters   only letters
+#   ./run-web.sh all            only the digits+letters model (stops with a message if it is not trained yet)
+#   ./run-web.sh auto 9000      different port
+# If ./mnist and ./emnist exist, the page also shows the test accuracy and corrections are mixed with real pictures.
 set -e
 mkdir -p out
 jc() { if command -v javac >/dev/null 2>&1; then javac "$@"; else java -m jdk.compiler/com.sun.tools.javac.Main "$@"; fi; }
 jc -d out src/minidl/*.java
-if [ "$1" = "all" ]; then MODEL=alnum-cnn.bin; DATA=.; elif [ "$1" = "letters" ]; then MODEL=emnist-letters-cnn.bin; DATA=emnist; else
-  MODEL=mnist-cnn.bin; for f in mnist-cnn-aug.bin mnist-cnn.bin; do [ -f "$f" ] && MODEL="$f" && break; done; DATA=mnist; fi
-[ -d "$DATA" ] || DATA=""
-[ "$1" = "all" ] && { [ -d mnist ] && [ -d emnist ] || DATA=""; }
-exec java -Xmx512m -cp out minidl.HandwritingServer "$MODEL" "${2:-8080}" $DATA
+case "$1" in
+  all)     MODEL=alnum-cnn.bin ;;
+  letters) MODEL=emnist-letters-cnn.bin ;;
+  digits)  MODEL=mnist-cnn.bin; for f in mnist-cnn-aug.bin mnist-cnn.bin; do [ -f "$f" ] && MODEL="$f" && break; done ;;
+  *)       MODEL=auto ;;
+esac
+exec java -Xmx1g -cp out minidl.HandwritingServer "$MODEL" "${2:-8080}" .

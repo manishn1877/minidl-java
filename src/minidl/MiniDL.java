@@ -13,7 +13,7 @@ public final class MiniDL {
     private MiniDL() {}
 
     /** Library version (kept in step with pom.xml). */
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.3.0";
 
     private static final Map<String, String[]> COMMANDS = new LinkedHashMap<>();
     static {
@@ -22,11 +22,15 @@ public final class MiniDL {
         COMMANDS.put("mnist",       new String[]{"MnistDemo", "train handwritten digits: <mnist-folder> [epochs] [mlp|cnn] [limit] [aug] [mmap]"});
         COMMANDS.put("emnist",      new String[]{"EmnistDemo", "train handwritten letters: <emnist-folder> [epochs] [limit] [aug]"});
         COMMANDS.put("alnum",       new String[]{"AlnumDemo", "ONE model for digits and letters: <mnist-folder> <emnist-folder> [epochs] [mnistLimit] [aug]"});
+        COMMANDS.put("check-data",  new String[]{"DataCheck", "SEE the training pictures per class, to check labels: <emnist-folder> [mnist-folder]"});
+        COMMANDS.put("plot",        new String[]{"Plot", "training curves as SVG: [logs-folder=docs/logs] [out=docs/mnist-training.svg]"});
+        COMMANDS.put("site",        new String[]{"SiteBuilder", "build the GitHub Pages site into docs/"});
         COMMANDS.put("cifar",       new String[]{"CifarDemo", "train on CIFAR-10 colour photos"});
         COMMANDS.put("text",        new String[]{"CharTransformerDemo", "tiny GPT-style character model"});
         COMMANDS.put("precision",   new String[]{"MixedPrecisionDemo", "16-bit mixed-precision training"});
         COMMANDS.put("bench",       new String[]{"Benchmark", "speed and memory benchmarks"});
-        COMMANDS.put("web",         new String[]{"HandwritingServer", "handwriting web app: [model.bin] [port] [data-folder]"});
+        COMMANDS.put("serve",       new String[]{"ModelServer", "model server (DJL-style): [--port N] [--store DIR] [--model name=file.bin,batch=16,delay=5,workers=1,max_workers=4,queue=100]"});
+        COMMANDS.put("web",         new String[]{"HandwritingServer", "handwriting web app: [auto|model.bin] [port] [data-folder]"});
     }
 
     public static void main(String[] args) throws Exception {

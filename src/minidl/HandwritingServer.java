@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -18,60 +20,79 @@ import java.util.concurrent.Executors;
 /**
  * Handwriting recognition web app, in pure Java (only the JDK's built-in web server, no libraries).
  *
- *   java -cp out minidl.HandwritingServer [model.bin] [port=8080] [mnist-folder]
+ *   java -cp out minidl.HandwritingServer [auto|model.bin] [port=8080] [data-folder]
  *
- * Open http://localhost:8080 , draw a digit (or a whole number), and the model answers live.
- *   model.bin     a model saved by MnistDemo (default: mnist-cnn-aug.bin, else mnist-cnn.bin)
- *   mnist-folder  optional. If model.bin does not exist yet, the server trains one first (3 epochs).
- *                 With the folder it also reports test accuracy and mixes real digits into corrections.
+ * With "auto" (the default) the server loads EVERY trained model it finds in the current folder and the page lets you
+ * switch between them:
+ *   alnum-cnn.bin          digits AND letters (36 classes)      key "all"
+ *   emnist-letters-cnn.bin letters A-Z (26 classes)             key "letters"
+ *   mnist-cnn-aug.bin      digits 0-9 (10 classes)              (or mnist-cnn.bin)   key "digits"
+ * The page opens with the broadest model, and says clearly which models are missing: a digits-only model can only
+ * answer with digits, so it reads a handwritten "B" as 8 or 6. Nothing is silently substituted.
+ * data-folder (default ".") holds mnist/ and emnist/ : it is used for the test accuracy and for mixing real pictures
+ * into corrections. With a model file instead of "auto", only that model is loaded.
  *
- * API:  GET /api/info    POST /api/predict?w=&amp;h=&amp;mode=single|multi&amp;tta=1   (body = w*h bytes of ink, 0..255)
- *       POST /api/learn?w=&amp;h=&amp;label=7   POST /api/save   POST /api/reset
+ * API:  GET /api/info    POST /api/predict?w=&amp;h=&amp;mode=single|multi&amp;tta=1&amp;model=all   (body = w*h bytes of ink, 0..255)
+ *       POST /api/learn?w=&amp;h=&amp;label=7&amp;model=all   POST /api/save?model=all   POST /api/reset?model=all
  */
 public class HandwritingServer {
-    static DigitRecognizer rec;
-    static String modelPath;
+    /** One loaded model. */
+    static final class Slot {
+        String key, name, file;
+        DigitRecognizer rec;
+        volatile double testAcc = -1;
+        boolean replayTried;
+    }
+
+    static final Map<String, Slot> slots = new LinkedHashMap<>();
+    static String defaultKey, warning = "", dataDir = ".";
     static File webDir = new File(System.getProperty("minidl.web", "web"));
-    static double testAcc = -1;
 
     public static void main(String[] args) throws Exception {
-        modelPath = args.length > 0 ? args[0] : firstExisting("mnist-cnn-aug.bin", "mnist-cnn.bin", "emnist-letters-cnn.bin");
+        String which = args.length > 0 ? args[0] : "auto";
         int port = args.length > 1 ? Integer.parseInt(args[1]) : 8080;
-        String mnist = args.length > 2 ? args[2] : null;
-        if (modelPath == null) modelPath = "mnist-cnn.bin";
+        if (args.length > 2) dataDir = args[2];
 
-        ByteSource all = null, tst = null;
-        Sequential model;
-        if (new File(modelPath).exists()) {
-            model = ModelIO.loadModelBinary(modelPath, new Random(1));
-            int classes = new DigitRecognizer(model).classes;
-            if (mnist != null && classes == 26 && EmnistLoader.exists(mnist)) {
-                all = EmnistLoader.lettersFrom(mnist, "train", Integer.MAX_VALUE);
-                tst = EmnistLoader.lettersFrom(mnist, "test", Integer.MAX_VALUE);
-            } else if (mnist != null && classes == 36 && new File(mnist, "mnist").isDirectory() && EmnistLoader.exists(mnist + "/emnist")) {
-                all = Alnum.load(mnist + "/mnist", mnist + "/emnist", "train", 60000);   // data folder = the project folder holding mnist/ and emnist/
-                tst = Alnum.load(mnist + "/mnist", mnist + "/emnist", "test", Integer.MAX_VALUE);
-            } else if (mnist != null && classes == 10 && new File(find(mnist, "train-images-idx3-ubyte")).exists()) {
-                all = MnistLoader.loadSource(find(mnist, "train-images-idx3-ubyte"), find(mnist, "train-labels-idx1-ubyte"), 60000);
-                tst = MnistLoader.loadSource(find(mnist, "t10k-images-idx3-ubyte"), find(mnist, "t10k-labels-idx1-ubyte"), Integer.MAX_VALUE);
-            }
-        } else if (mnist != null && new File(find(mnist, "train-images-idx3-ubyte")).exists()) {
-            all = MnistLoader.loadSource(find(mnist, "train-images-idx3-ubyte"), find(mnist, "train-labels-idx1-ubyte"), 60000);
-            tst = MnistLoader.loadSource(find(mnist, "t10k-images-idx3-ubyte"), find(mnist, "t10k-labels-idx1-ubyte"), Integer.MAX_VALUE);
-            System.out.println("no " + modelPath + " yet: training a CNN for " + System.getProperty("minidl.epochs", "3") + " epochs first...");
-            model = train(all);
-            ModelIO.saveBinary(model, modelPath);
-        } else {
-            System.out.println("model file '" + modelPath + "' not found.\n  Digits:  java -cp out minidl.MnistDemo mnist 8 cnn aug   (makes mnist-cnn-aug.bin)\n  Letters: ./get-emnist.sh  then  java -cp out minidl.EmnistDemo emnist   (makes emnist-letters-cnn.bin)\n"
-                + "  or let the server train a quick one:  java -cp out minidl.HandwritingServer " + modelPath + " 8080 mnist");
+        if (which.equals("auto")) {
+            for (String f : new String[]{"alnum-cnn.bin", "emnist-letters-cnn.bin", "mnist-cnn-aug.bin"}) if (new File(f).exists()) addSlot(f);
+            if (!slots.containsKey("digits") && new File("mnist-cnn.bin").exists()) addSlot("mnist-cnn.bin");
+        } else if (new File(which).exists()) {
+            addSlot(which);
+        } else if (which.contains("emnist") || which.contains("alnum")) {
+            System.out.println("model file '" + which + "' not found. Train it first with ./train-all.sh (it needs the EMNIST data: ./get-emnist.sh).");
+            return;
+        } else if (new File(dataDir, "mnist").isDirectory() || loadSplit(10, dataDir, true) != null) { // asked for a digits model that does not exist yet: train a quick one
+            System.out.println("no " + which + " yet: training a CNN for " + System.getProperty("minidl.epochs", "3") + " epochs first...");
+            ByteSource all = loadSplit(10, dataDir, true);
+            Sequential m = train(all);
+            ModelIO.saveBinary(m, which);
+            addSlot(which);
+        }
+        if (slots.isEmpty()) {
+            System.out.println("No trained model found in this folder. Train one first:\n"
+                + "  digits 0-9:            java -cp out minidl.MnistDemo mnist 8 cnn 60000 aug      (makes mnist-cnn-aug.bin)\n"
+                + "  everything at once:    ./train-all.sh                                           (digits, letters, and digits+letters)");
             return;
         }
-        rec = new DigitRecognizer(model);
-        if (all != null) rec.replayFrom(all.view(0, all.size() - all.size() / 10));
-        if (tst != null) { testAcc = rec.accuracy(tst); System.out.printf("model %s: %.2f%% on %d unseen test pictures%n", modelPath, testAcc, tst.size()); }
+        defaultKey = slots.keySet().iterator().next();
+        warning = buildWarning();
+        if (!warning.isEmpty()) System.out.println("WARNING: " + warning);
         if (!new File(webDir, "index.html").exists() && HandwritingServer.class.getResource("/web/index.html") == null) System.out.println("warning: " + new File(webDir, "index.html").getAbsolutePath() + " not found (run from the project folder)");
 
-        HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0); // localhost only
+        Thread acc = new Thread(HandwritingServer::measureAccuracies, "test-accuracy");
+        acc.setDaemon(true);
+        acc.start();
+
+        startHttp(port);
+        StringBuilder names = new StringBuilder();
+        for (Slot s : slots.values()) names.append(names.length() > 0 ? ", " : "").append(s.key).append(" = ").append(s.file);
+        System.out.println("models loaded: " + names + "   (page opens with '" + defaultKey + "')");
+        System.out.println("open http://localhost:" + port + "   (Ctrl+C to stop)");
+    }
+
+    /** Starts the web server (localhost only) and returns it. */
+    static HttpServer startHttp(int port) throws IOException {
+        HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         http.createContext("/", ex -> guard(ex, HandwritingServer::page));
         http.createContext("/api/info", ex -> guard(ex, HandwritingServer::info));
         http.createContext("/api/predict", ex -> guard(ex, HandwritingServer::predict));
@@ -80,16 +101,111 @@ public class HandwritingServer {
         http.createContext("/api/reset", ex -> guard(ex, HandwritingServer::reset));
         http.setExecutor(Executors.newFixedThreadPool(4));
         http.start();
-        System.out.println("open http://localhost:" + port + "   (Ctrl+C to stop)");
+        return http;
+    }
+
+    static void addSlot(String file) throws IOException {
+        Sequential model = ModelIO.loadModelBinary(file, new Random(1));
+        Slot s = new Slot();
+        s.rec = new DigitRecognizer(model);
+        s.file = file;
+        s.key = s.rec.classes == 36 ? "all" : s.rec.classes == 26 ? "letters" : "digits";
+        s.name = s.rec.classes == 36 ? "digits + letters" : s.rec.classes == 26 ? "letters A-Z" : "digits 0-9";
+        slots.put(s.key, s);
+    }
+
+    static String buildWarning() {
+        if (slots.containsKey("all")) return "";
+        if (!slots.containsKey("letters"))
+            return "Only the digits model is loaded (" + slots.get("digits").file + "), so everything you write is read as a digit: a letter becomes 8, 6, 0 ... "
+                + "Run ./train-all.sh (needs the data), then restart ./run-web.sh.";
+        return "The digits + letters model (alnum-cnn.bin) is not trained yet. Use the letters or digits model for now, or run ./train-all.sh then restart.";
+    }
+
+    /** Test accuracy of every model on its own unseen test pictures (needs the data folder); runs in the background after the start. */
+    static void measureAccuracies() {
+        for (Slot s : slots.values()) {
+            try {
+                ByteSource t = loadSplit(s.rec.classes, dataDir, false);
+                if (t == null) continue;
+                s.testAcc = s.rec.accuracy(t);
+                System.out.printf("model %s (%s): %.2f%% on %d unseen test pictures%n", s.file, s.name, s.testAcc, t.size());
+            } catch (Exception | OutOfMemoryError e) { System.out.println("could not measure " + s.file + ": " + e); }
+        }
+    }
+
+    /** Real pictures to mix into corrections (so the model does not forget); loaded the first time a correction is made. */
+    static void ensureReplay(Slot s) {
+        synchronized (s) {
+            if (s.replayTried) return;
+            s.replayTried = true;
+            try {
+                ByteSource tr = loadSplit(s.rec.classes, dataDir, true);
+                if (tr != null) s.rec.replayFrom(tr.view(0, tr.size() - tr.size() / 10));
+            } catch (Exception | OutOfMemoryError e) { System.out.println("no replay data for " + s.file + ": " + e); }
+        }
+    }
+
+    /** The train or test pictures that match a model with this many classes, or null when the data folder does not have them. */
+    static ByteSource loadSplit(int classes, String dir, boolean train) throws IOException {
+        if (dir == null) return null;
+        String split = train ? "train" : "test", pre = train ? "train" : "t10k";
+        int max = train ? 60000 : Integer.MAX_VALUE;
+        if (classes == 36) {
+            String m = new File(dir, "mnist").getPath(), e = new File(dir, "emnist").getPath();
+            return Alnum.exists(m, e) ? Alnum.load(m, e, split, max) : null;
+        }
+        if (classes == 26) {
+            String e = EmnistLoader.exists(dir) ? dir : new File(dir, "emnist").getPath();
+            return EmnistLoader.exists(e) ? EmnistLoader.lettersFrom(e, split, Integer.MAX_VALUE) : null;
+        }
+        String m = new File(find(dir, pre + "-images-idx3-ubyte")).exists() ? dir : new File(dir, "mnist").getPath();
+        if (!new File(find(m, pre + "-images-idx3-ubyte")).exists()) return null;
+        return MnistLoader.loadSource(find(m, pre + "-images-idx3-ubyte"), find(m, pre + "-labels-idx1-ubyte"), max);
     }
 
     // ------------------------------------------------------------------ handlers
     interface Handler { void run(HttpExchange ex) throws Exception; }
 
+    /** Websites that may talk to this server from a browser (default: the project's GitHub Pages site). Change with -Dminidl.cors=https://a.example,https://b.example */
+    static final java.util.Set<String> ALLOWED_ORIGINS = new java.util.HashSet<>(java.util.Arrays.asList(System.getProperty("minidl.cors", "https://manishn1877.github.io").split(",")));
+
+    /**
+     * Cross-origin rules. A page from an allowed origin may call the API (needed when the page is hosted on GitHub Pages and the
+     * Java server runs on your own computer). Every POST must carry the header X-MiniDL: a browser then asks permission first
+     * (a preflight), and only an allowed origin gets it, so a random website cannot make your browser change your local model.
+     * Returns false when the request is already answered.
+     */
+    static boolean cors(HttpExchange ex) throws IOException {
+        String origin = ex.getRequestHeaders().getFirst("Origin");
+        boolean allowed = origin != null && ALLOWED_ORIGINS.contains(origin);
+        if (allowed) {
+            ex.getResponseHeaders().set("Access-Control-Allow-Origin", origin);
+            ex.getResponseHeaders().set("Vary", "Origin");
+            ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, X-MiniDL");
+            ex.getResponseHeaders().set("Access-Control-Allow-Private-Network", "true"); // an https page calling localhost
+            ex.getResponseHeaders().set("Access-Control-Max-Age", "600");
+        }
+        if (ex.getRequestMethod().equals("OPTIONS")) { ex.sendResponseHeaders(allowed ? 204 : 403, -1); ex.close(); return false; }
+        if (ex.getRequestMethod().equals("POST") && ex.getRequestHeaders().getFirst("X-MiniDL") == null) {
+            send(ex, 403, "application/json", "{\"error\":\"missing header X-MiniDL (a safety rule: other websites must not be able to change your model)\"}");
+            return false;
+        }
+        return true;
+    }
+
     static void guard(HttpExchange ex, Handler h) throws IOException {
-        try { h.run(ex); }
+        try { if (!cors(ex)) return; h.run(ex); }
         catch (IllegalArgumentException e) { send(ex, 400, "application/json", "{\"error\":" + str(e.getMessage()) + "}"); }
         catch (Exception e) { send(ex, 500, "application/json", "{\"error\":" + str(String.valueOf(e)) + "}"); }
+    }
+
+    static Slot slot(Map<String, String> q) {
+        String k = q.getOrDefault("model", defaultKey);
+        Slot s = slots.get(k);
+        if (s == null) throw new IllegalArgumentException("model '" + k + "' is not loaded (loaded: " + slots.keySet() + ")");
+        return s;
     }
 
     static void page(HttpExchange ex) throws IOException {
@@ -104,55 +220,68 @@ public class HandwritingServer {
     }
 
     static void info(HttpExchange ex) throws IOException {
-        send(ex, 200, "application/json", "{\"params\":" + rec.paramCount() + ",\"kb\":" + String.format("%.1f", rec.weightBytes() / 1024.0)
-            + ",\"alphabet\":" + str(rec.alphabet) + ",\"learned\":" + rec.learnedCount() + ",\"testAcc\":" + testAcc + ",\"model\":" + str(new File(modelPath).getName()) + "}");
+        StringBuilder sb = new StringBuilder("{\"default\":" + str(defaultKey) + ",\"warning\":" + str(warning) + ",\"models\":[");
+        boolean first = true;
+        for (Slot s : slots.values()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("{\"key\":").append(str(s.key)).append(",\"name\":").append(str(s.name)).append(",\"file\":").append(str(new File(s.file).getName()))
+              .append(",\"alphabet\":").append(str(s.rec.alphabet)).append(",\"params\":").append(s.rec.paramCount())
+              .append(",\"kb\":").append(String.format("%.1f", s.rec.weightBytes() / 1024.0)).append(",\"learned\":").append(s.rec.learnedCount())
+              .append(",\"testAcc\":").append(s.testAcc).append('}');
+        }
+        send(ex, 200, "application/json", sb.append("]}").toString());
     }
 
     static void predict(HttpExchange ex) throws Exception {
         Map<String, String> q = query(ex);
+        Slot s = slot(q);
         int[] wh = new int[2];
         float[] ink = readInk(ex, q, wh);
         boolean multi = "multi".equals(q.get("mode")), tta = !"0".equals(q.get("tta"));
         long t0 = System.nanoTime();
-        List<DigitPreprocess.Piece> pieces = new java.util.ArrayList<>();
-        if (multi) pieces = DigitPreprocess.segment(ink, wh[0], wh[1], rec.style());
-        else { DigitPreprocess.Piece p = DigitPreprocess.whole(ink, wh[0], wh[1], rec.style()); if (p != null) pieces.add(p); }
+        List<DigitPreprocess.Piece> pieces = new ArrayList<>();
+        if (multi) pieces = DigitPreprocess.segment(ink, wh[0], wh[1], s.rec.style(), px -> s.rec.predict(px, false).confidence);
+        else { DigitPreprocess.Piece p = DigitPreprocess.whole(ink, wh[0], wh[1], s.rec.style()); if (p != null) pieces.add(p); }
         StringBuilder digits = new StringBuilder(), text = new StringBuilder();
         for (DigitPreprocess.Piece p : pieces) {
-            DigitRecognizer.Result r = rec.predict(p.pixels, tta);
+            DigitRecognizer.Result r = s.rec.predict(p.pixels, tta);
             if (digits.length() > 0) digits.append(',');
-            digits.append(digitJson(p, r));
-            text.append(r.confidence < 0.5 ? '?' : rec.alphabet.charAt(r.label));
+            digits.append(digitJson(s, p, r));
+            text.append(r.confidence < 0.5 ? '?' : s.rec.alphabet.charAt(r.label));
         }
         double ms = (System.nanoTime() - t0) / 1e6;
-        send(ex, 200, "application/json", String.format("{\"ms\":%.1f,\"text\":\"%s\",\"digits\":[%s]}", ms, text, digits));
+        send(ex, 200, "application/json", String.format("{\"ms\":%.1f,\"model\":%s,\"text\":\"%s\",\"digits\":[%s]}", ms, str(s.key), text, digits));
     }
 
     static void learn(HttpExchange ex) throws Exception {
         Map<String, String> q = query(ex);
+        Slot s = slot(q);
         int[] wh = new int[2];
         float[] ink = readInk(ex, q, wh);
         int label = Integer.parseInt(q.getOrDefault("label", "-1"));
-        DigitPreprocess.Piece p = DigitPreprocess.whole(ink, wh[0], wh[1], rec.style());
+        DigitPreprocess.Piece p = DigitPreprocess.whole(ink, wh[0], wh[1], s.rec.style());
         if (p == null) throw new IllegalArgumentException("nothing drawn");
-        double loss = rec.learn(p.pixels, label);
-        try (FileOutputStream f = new FileOutputStream(rec.classes == 36 ? "feedback-all.bin" : rec.classes == 26 ? "feedback-letters.bin" : "feedback.bin", true)) { // every correction is kept: 784 pixel bytes + 1 label byte
+        ensureReplay(s);
+        double loss = s.rec.learn(p.pixels, label);
+        try (FileOutputStream f = new FileOutputStream(s.key.equals("digits") ? "feedback.bin" : "feedback-" + s.key + ".bin", true)) { // every correction is kept: 784 pixel bytes + 1 label byte
             byte[] rec1 = new byte[DigitRecognizer.DIM + 1];
             for (int i = 0; i < DigitRecognizer.DIM; i++) rec1[i] = (byte) Math.round(p.pixels[i] * 255);
             rec1[DigitRecognizer.DIM] = (byte) label;
             f.write(rec1);
         }
-        send(ex, 200, "application/json", String.format("{\"loss\":%.4f,\"learned\":%d,\"digit\":%s}", loss, rec.learnedCount(), digitJson(p, rec.predict(p.pixels, true))));
+        send(ex, 200, "application/json", String.format("{\"loss\":%.4f,\"learned\":%d,\"digit\":%s}", loss, s.rec.learnedCount(), digitJson(s, p, s.rec.predict(p.pixels, true))));
     }
 
     static void save(HttpExchange ex) throws Exception {
-        String out = modelPath.replaceAll("\\.bin$", "") + "-tuned.bin";
-        rec.save(out);
+        Slot s = slot(query(ex));
+        String out = s.file.replaceAll("\\.bin$", "") + "-tuned.bin";
+        s.rec.save(out);
         send(ex, 200, "application/json", "{\"saved\":" + str(out) + "}");
     }
 
     static void reset(HttpExchange ex) throws IOException {
-        rec.reset();
+        slot(query(ex)).rec.reset();
         send(ex, 200, "application/json", "{\"ok\":true}");
     }
 
@@ -169,9 +298,9 @@ public class HandwritingServer {
         return ink;
     }
 
-    static String digitJson(DigitPreprocess.Piece p, DigitRecognizer.Result r) {
+    static String digitJson(Slot s, DigitPreprocess.Piece p, DigitRecognizer.Result r) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"label\":%d,\"ch\":\"" + rec.alphabet.charAt(r.label) + "\",\"conf\":%.4f,\"bits\":%.3f,\"probs\":[", p.x, p.y, p.w, p.h, r.label, r.confidence, r.entropyBits));
+        sb.append(String.format("{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"label\":%d,\"ch\":\"%c\",\"conf\":%.4f,\"bits\":%.3f,\"note\":%s,\"probs\":[", p.x, p.y, p.w, p.h, r.label, s.rec.alphabet.charAt(r.label), r.confidence, r.entropyBits, p.note == null ? "null" : str(p.note)));
         for (int i = 0; i < r.probs.length; i++) sb.append(i > 0 ? "," : "").append(String.format("%.4f", r.probs[i]));
         sb.append("],\"view\":[");
         for (int i = 0; i < p.pixels.length; i++) sb.append(i > 0 ? "," : "").append(Math.round(p.pixels[i] * 255));
@@ -195,8 +324,6 @@ public class HandwritingServer {
         ex.getResponseBody().write(b);
         ex.close();
     }
-
-    static String firstExisting(String... names) { for (String n : names) if (new File(n).exists()) return n; return null; }
 
     static String find(String dir, String name) {
         File gz = new File(dir, name + ".gz");

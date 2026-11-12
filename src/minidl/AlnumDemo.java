@@ -5,7 +5,7 @@ import java.util.Random;
 
 /**
  * ONE model for digits and letters (36 classes: 0-9, A-Z). Needs both data sets (get-mnist.sh, get-emnist.sh).
- *  java -Xmx1g -cp out minidl.AlnumDemo &lt;mnist-folder&gt; &lt;emnist-folder&gt; [epochs=8] [mnistLimit=60000] [aug]
+ *   java -Xmx1g -cp out minidl.AlnumDemo &lt;mnist-folder&gt; &lt;emnist-folder&gt; [epochs=8] [mnistLimit=60000] [aug]
  * Saves alnum-cnn.bin. The web app uses it with  ./run-web.sh all
  * Some pairs are impossible to tell apart on their own, even for people: 0 and O, 1 and I, 2 and Z, 5 and S, 8 and B.
  * The model can only guess from the shape and the habit of the writer, so expect more mix-ups there than in the two separate models.

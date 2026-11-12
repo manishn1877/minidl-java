@@ -5,14 +5,14 @@
 <style>
 :root{--paper:#eef1ee;--ink:#14213d;--red:#d7263d;--line:#c9d3d0;--mono:ui-monospace,Menlo,Consolas,monospace}
 *{box-sizing:border-box}
-body{margin:0;font:15px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper) linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 28px;min-height:100vh}
+body{margin:0;overscroll-behavior:contain;font:15px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper) linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 28px;min-height:100vh}
 main{max-width:1000px;margin:0 auto;padding:20px 16px 40px;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}
 @media(max-width:800px){main{grid-template-columns:1fr}}
 h1{grid-column:1/-1;margin:0;font:700 26px/1.2 var(--mono)}
 h1 small{display:block;font:400 13px var(--mono);opacity:.7;margin-top:4px}
 .card{background:#fff;border:2px solid var(--ink);padding:12px;box-shadow:5px 5px 0 var(--ink)}
 .stage{position:relative;line-height:0;border:1px solid var(--line);touch-action:none}
-canvas#c{width:100%;height:auto;cursor:crosshair;background:#fff;display:block}
+canvas#c{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;width:100%;height:auto;cursor:crosshair;background:#fff;display:block}
 canvas#o{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
 button{font:600 13px var(--mono);border:2px solid var(--ink);background:#fff;color:var(--ink);padding:6px 10px;cursor:pointer}
@@ -24,6 +24,9 @@ label{font-size:13px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .chip{font:600 13px var(--mono);border:2px solid var(--ink);padding:2px 8px;cursor:pointer;background:#fff}
 .chip.sel{border-color:var(--red);color:var(--red)}
+.chip.unsure{border-style:dashed}
+#warn{grid-column:1/-1;background:#fff3cd;border:2px solid var(--ink);padding:8px 12px;font:13px var(--mono)}
+#models{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;font:12px var(--mono)}
 .bar{display:grid;grid-template-columns:16px 1fr 46px;gap:6px;align-items:center;font:12px var(--mono);margin:2px 0}
 .bar i{display:block;height:12px;background:var(--ink);width:0;transition:width .15s}
 .bar.top i{background:var(--red)}
@@ -34,8 +37,10 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
 .side{display:flex;flex-direction:column;gap:20px}
 </style></head><body><main>
 <h1>MiniDL handwriting<small id="info">loading model...</small></h1>
+<div id="warn" hidden></div>
 
 <section class="card">
+  <div id="models"></div>
   <div class="stage"><canvas id="c" width="720" height="320"></canvas><canvas id="o" width="720" height="320"></canvas></div>
   <div class="row">
     <button id="mSingle" class="on">one character</button><button id="mMulti">many (number / word)</button>
@@ -70,16 +75,37 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
   </div>
 </section>
 </main>
+<section id="about" style="max-width:1000px;margin:0 auto;padding:0 16px 40px;font:13px/1.5 var(--mono)">
+  <h2>about</h2>
+  <p>MiniDL is a deep learning library written only in Java: tensors, backpropagation, convolutions, ResNet, LSTM, transformers, a model server. This page is its handwriting demo. The page draws; the Java program recognises.</p>
+  <p>Run it: <code>./run-web.sh</code> or <code>java -jar minidl-1.3.0.jar web</code>, then open <code>http://localhost:8080</code>. Source and instructions: <a href="https://github.com/manishn1877/minidl-java">github.com/manishn1877/minidl-java</a>.</p>
+  <img src="mnist-training.svg" alt="training curves" style="max-width:100%" onerror="this.remove()">
+</section>
 <script>
 const $=s=>document.querySelector(s), cv=$('#c'), ov=$('#o'), ctx=cv.getContext('2d',{willReadFrequently:true}), oc=ov.getContext('2d');
 const W=cv.width, H=cv.height;
-let abc='0123456789', prac=false, tgt='', pool=[], got=0, tried=0, mode='single', drawing=false, last=[], sel=0, text='', ms=0, timer=0, seq=0, undo=[];
+const qs=new URLSearchParams(location.search);
+const onPages=location.hostname.endsWith('github.io')||location.protocol==='file:';
+let API=qs.get('server')||(()=>{try{return localStorage.getItem('minidlServer')}catch(e){return null}})()||(onPages?'http://localhost:8080':'');
+const base=()=>API?API.replace(/\/+$/,'')+'/':'';   // '' = the server that served this page; relative paths also work under /minidl-java/
+const api=(p,o={})=>fetch(base()+p,Object.assign({},o,{headers:Object.assign({'X-MiniDL':'1'},o.headers||{})}));
+function offline(){
+  const w=$('#warn');w.hidden=false;
+  w.innerHTML='Cannot reach the MiniDL Java server at <b>'+(API||location.origin)+'</b>. This page only draws: the recognising is done by the Java program on your computer. '
+   +'Start it with <code>java -jar minidl-1.3.0.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
+   +'<br>Server address: <input id="srv" size="24" value="'+(API||'http://localhost:8080')+'"> <button id="conn">connect</button>'
+   +' <small>(Safari may block an https page from calling http://localhost: open the address the server prints instead.)</small>';
+  $('#conn').onclick=()=>{API=$('#srv').value.trim();try{localStorage.setItem('minidlServer',API)}catch(e){}cur='';info().then(predict)};
+  $('#info').textContent='not connected';
+}
+let abc='0123456789', cur='', models=[], prac=false, tgt='', pool=[], got=0, tried=0, mode='single', drawing=false, last=[], sel=0, text='', ms=0, timer=0, seq=0, undo=[];
 const blank=()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H)}; blank();
 const say=t=>{$('#msg').textContent=t};
 const later=t=>{clearTimeout(timer);timer=setTimeout(predict,t)};
 const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
 
-cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);undo.push(ctx.getImageData(0,0,W,H));if(undo.length>20)undo.shift();
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{e.preventDefault();cv.setPointerCapture(e.pointerId);undo.push(ctx.getImageData(0,0,W,H));if(undo.length>20)undo.shift();
   drawing=true;const[x,y]=pos(e);ctx.fillStyle=ctx.strokeStyle='#111';ctx.lineWidth=+$('#brush').value;ctx.lineCap=ctx.lineJoin='round';
   ctx.beginPath();ctx.arc(x,y,ctx.lineWidth/2,0,7);ctx.fill();ctx.beginPath();ctx.moveTo(x,y);later(500)});
 cv.addEventListener('pointermove',e=>{if(!drawing)return;const[x,y]=pos(e);ctx.lineTo(x,y);ctx.stroke();ctx.beginPath();ctx.moveTo(x,y);later(300)});
@@ -92,18 +118,18 @@ async function predict(){
   const ink=getInk(), my=++seq;
   if(!ink){last=[];text='';render();return}
   try{
-    const r=await fetch(`/api/predict?w=${W}&h=${H}&mode=${mode}&tta=${$('#tta').checked?1:0}`,{method:'POST',body:ink});
+    const r=await api(`api/predict?model=${cur}&w=${W}&h=${H}&mode=${mode}&tta=${$('#tta').checked?1:0}`,{method:'POST',body:ink});
     const j=await r.json(); if(my!==seq)return; if(j.error){say(j.error);return}
     last=j.digits;text=j.text;ms=j.ms;sel=Math.min(sel,Math.max(0,last.length-1));render();
-  }catch(e){say('server not reachable: '+e)}
+  }catch(e){offline()}
 }
 
 function render(){
   $('#answer').textContent=text||'-';
   $('#meta').textContent=last.length?`${ms} ms · ${last.length} character${last.length>1?'s':''}`:'draw something';
   $('#chips').innerHTML='';
-  if(mode==='multi')last.forEach((d,i)=>{const c=document.createElement('span');c.className='chip'+(i===sel?' sel':'');
-    c.textContent=`${d.ch} ${Math.round(d.conf*100)}%`;c.onclick=()=>{sel=i;render()};$('#chips').append(c)});
+  if(mode==='multi')last.forEach((d,i)=>{const c=document.createElement('span');c.className='chip'+(i===sel?' sel':'')+(d.conf<0.8?' unsure':'');c.title=d.note||(d.conf<0.8?'not sure: this one is a guess':'');
+    c.textContent=`${d.ch} ${Math.round(d.conf*100)}%${d.note?' ⚠':''}`;c.onclick=()=>{sel=i;render()};$('#chips').append(c)});
   const d=last[sel], bars=$('#bars'); bars.innerHTML='';
   if(d)d.probs.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).slice(0,6).forEach(([p,i])=>{const b=document.createElement('div');b.className='bar'+(i===d.label?' top':'');
     b.innerHTML=`<span>${abc[i]}</span><div><i style="width:${(p*100).toFixed(1)}%"></i></div><span>${(p*100).toFixed(1)}%</span>`;bars.append(b)});
@@ -119,18 +145,18 @@ $('#mSingle').onclick=()=>setMode('single');$('#mMulti').onclick=()=>setMode('mu
 $('#clear').onclick=()=>{undo.push(ctx.getImageData(0,0,W,H));blank();say('');predict()};
 $('#undo').onclick=()=>{if(undo.length){ctx.putImageData(undo.pop(),0,0);predict()}};
 $('#tta').onchange=predict;
-addEventListener('keydown',e=>{if(e.key==='c')$('#clear').click();if(e.key==='z')$('#undo').click()});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='c')$('#clear').click();if(e.key==='z')$('#undo').click()});
 
 function buildTeach(){$('#teach').innerHTML='';[...abc].forEach((c,i)=>{const b=document.createElement('button');b.textContent=c;b.onclick=()=>teach(i);$('#teach').append(b)})}
 async function teach(n){
   const ink=getInk(); if(!ink)return;
-  const r=await fetch(`/api/learn?w=${W}&h=${H}&label=${n}`,{method:'POST',body:ink}), j=await r.json();
+  const r=await api(`api/learn?model=${cur}&w=${W}&h=${H}&label=${n}`,{method:'POST',body:ink}), j=await r.json();
   if(j.error){say(j.error);return}
   last=[j.digit];text=j.digit.ch;render();
   say(`learned a "${abc[n]}" (${j.learned} correction${j.learned>1?'s':''} so far). Now it says ${j.digit.ch} at ${Math.round(j.digit.conf*100)}%.`);info();
 }
-$('#save').onclick=async()=>{const j=await (await fetch('/api/save',{method:'POST'})).json();say(j.error||'saved to '+j.saved)};
-$('#reset').onclick=async()=>{await fetch('/api/reset',{method:'POST'});say('model reset to its original weights');info();predict()};
+$('#save').onclick=async()=>{const j=await (await api('api/save?model='+cur,{method:'POST'})).json();say(j.error||'saved to '+j.saved)};
+$('#reset').onclick=async()=>{await api('api/reset?model='+cur,{method:'POST'});say('model reset to its original weights');info();predict()};
 
 $('#up').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image();img.onload=()=>{
@@ -145,22 +171,27 @@ function cleanPhoto(){ // photos of paper: find the background grey, flip if the
     const g=255-Math.min(255,dark*1.4);d[i]=d[i+1]=d[i+2]=g;d[i+3]=255}
   ctx.putImageData(im,0,0)}
 
-async function info(){try{const j=await (await fetch('/api/info')).json();if(j.alphabet&&j.alphabet!==abc){abc=j.alphabet;buildTeach();nextTarget()}
-  $('#info').textContent=`${j.model} · ${j.params.toLocaleString()} weights · ${j.kb} KB`+(j.testAcc>=0?` · ${j.testAcc.toFixed(2)}% on MNIST test`:'')+(j.learned?` · ${j.learned} corrections`:'')}catch(e){$('#info').textContent='server not reachable'}}
+function pick(k){cur=k;const m=models.find(x=>x.key===k);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo();predict()}
+function showInfo(){const m=models.find(x=>x.key===cur);if(!m)return;
+  $('#info').textContent=`${m.name} · ${m.file} · ${m.params.toLocaleString()} weights`+(m.testAcc>=0?` · ${m.testAcc.toFixed(2)}% on unseen test pictures`:'')+(m.learned?` · ${m.learned} corrections`:'');
+  $('#models').innerHTML='<span>model:</span>';models.forEach(x=>{const b=document.createElement('button');b.textContent=x.name;b.className=x.key===cur?'on':'';b.onclick=()=>pick(x.key);$('#models').append(b)})}
+async function info(){try{const j=await (await fetch(base()+'api/info')).json();models=j.models;if(!cur)cur=j.default;
+  const w=$('#warn');w.hidden=!j.warning;w.textContent=j.warning||'';
+  const m=models.find(x=>x.key===cur);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo()}catch(e){offline()}}
 
 function nextTarget(){if(!pool.length)pool=[...abc].sort(()=>Math.random()-.5);tgt=pool.pop();$('#target').textContent=tgt}
 function showScore(){$('#score').textContent=tried?`before learning from you, the model was right on ${got} of ${tried}. ${pool.length} left in this round.`:'it learns from each drawing you submit'}
 async function submit(){
   const ink=getInk(); if(!ink||!tgt)return;
-  const q=`w=${W}&h=${H}`, idx=abc.indexOf(tgt);
-  const p=await (await fetch(`/api/predict?${q}&mode=single&tta=0`,{method:'POST',body:ink})).json();
+  const q=`model=${cur}&w=${W}&h=${H}`, idx=abc.indexOf(tgt);
+  const p=await (await api(`api/predict?${q}&mode=single&tta=0`,{method:'POST',body:ink})).json();
   if(p.digits&&p.digits[0]){tried++;if(p.digits[0].ch===tgt)got++}
-  const j=await (await fetch(`/api/learn?${q}&label=${idx}`,{method:'POST',body:ink})).json();
+  const j=await (await api(`api/learn?${q}&label=${idx}`,{method:'POST',body:ink})).json();
   if(j.error){say(j.error);return}
   blank();undo=[];last=[];text='';render();nextTarget();showScore();info();
 }
 $('#prac').onclick=()=>{prac=!prac;$('#prac').classList.toggle('on',prac);$('#pracBox').hidden=!prac;if(prac){setMode('single');nextTarget();showScore()}render()};
 $('#submit').onclick=submit;$('#skip').onclick=()=>{nextTarget();$('#clear').click()};
-addEventListener('keydown',e=>{if(e.key==='Enter'&&prac)submit()});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Enter'&&prac)submit()});
 info();render();
 </script></body></html>

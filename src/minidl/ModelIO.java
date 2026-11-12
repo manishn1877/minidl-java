@@ -119,6 +119,8 @@ public final class ModelIO {
             case "GELU":       return new Activations.GELU();
             case "Dropout":    return new Dropout(Double.parseDouble(t[1]), rnd);
             case "BatchNorm":  return new BatchNorm(i(t[1]), Double.parseDouble(t[2]));
+            case "BatchNorm2D": return new BatchNorm2D(i(t[1]), i(t[2]), i(t[3]), Double.parseDouble(t[4]));
+            case "LSTM":       return new LSTM(i(t[1]), i(t[2]), i(t[3]), t[4].equals("1"), rnd);
             case "LayerNorm":  return new LayerNorm(i(t[1]));
             case "Conv2D":     return t.length > 8 ? new Conv2D(i(t[1]), i(t[2]), i(t[3]), i(t[4]), i(t[5]), i(t[6]), i(t[7]), i(t[8]), i(t[9]), rnd)
                                            : new Conv2D(i(t[1]), i(t[2]), i(t[3]), i(t[4]), i(t[5]), i(t[6]), i(t[7]), rnd);
