@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MiniDL 1.4.0 – Deep Learning in Pure Java</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#14171f;--mu:#5b6275;--ac:#4f46e5;--ac2:#06b6d4;--ok:#16a34a;--bd:#e2e5ee;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1117;--card:#171b25;--tx:#e8eaf2;--mu:#9aa3b8;--ac:#818cf8;--ac2:#22d3ee;--ok:#4ade80;--bd:#272d3b}}
+:root[data-theme="dark"]{--bg:#0e1117;--card:#171b25;--tx:#e8eaf2;--mu:#9aa3b8;--ac:#818cf8;--ac2:#22d3ee;--ok:#4ade80;--bd:#272d3b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}
+header{padding:48px 0 24px;text-align:center}
+h1{font-size:clamp(2rem,6vw,3.2rem);margin:0;letter-spacing:-1px}
+h1 span{background:linear-gradient(90deg,var(--ac),var(--ac2));-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{margin:40px 0 12px;font-size:1.5rem}
+p.s{color:var(--mu);max-width:640px;margin:12px auto}
+.btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+.btns a{padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:600;border:1px solid var(--bd);color:var(--tx);background:var(--card)}
+.btns a.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{text-align:center}.stat b{display:block;font-size:2rem;color:var(--ac)}.stat i{color:var(--mu);font-style:normal;font-size:.85rem}
+.sc{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--bd);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mu);font-weight:600}
+svg{max-width:100%;height:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:.8rem;padding:3px 9px;border-radius:99px;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 35%,transparent)}
+.chip:before{content:"✓ "}
+details{border-top:1px solid var(--bd);padding:10px 0}summary{cursor:pointer;font-weight:600}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.tabs button{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:6px 12px;border-radius:8px;cursor:pointer}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.flow{stroke-dasharray:6 6;animation:d 1.2s linear infinite}@keyframes d{to{stroke-dashoffset:-12}}
+@media(prefers-reduced-motion:reduce){.flow{animation:none}}
+footer{text-align:center;color:var(--mu);padding:32px 0}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+pre{margin:0;padding:12px;border-radius:10px;background:var(--bg);border:1px solid var(--bd);overflow-x:auto;font-size:.8rem;line-height:1.5}
+.two h3{margin:0 0 6px;font-size:1rem}
+body[data-v="1"] .v2,body[data-v="2"] .v1{display:none}
+</style></head><body><main>
+<header>
+<h1>Mini<span>DL</span> 1.4.0</h1>
+<p class="s">A deep learning library written from scratch in pure Java – tensors, backprop, CNNs, transformers, quantization – plus a handwriting recognition model built on top of it.</p>
+<div class="btns v1"><a class="p" href="https://github.com/manishn1877/minidl-java">GitHub repo</a><a href="#handwriting">Handwriting recognition model</a><a href="https://github.com/manishn1877">@manishn1877</a></div><div class="btns v2"><a class="p" href="https://github.com/manishn1877/minidl-java">GitHub repo</a><a href="#overview">← Neural network in Java (Man-JAVA)</a><a href="https://github.com/manishn1877">@manishn1877</a></div>
+</header>
+
+<div class="grid v2">
+<div class="card stat"><b>283/283</b><i>tests passed</i></div>
+<div class="card stat"><b>99.02%</b><i>MNIST digit accuracy</i></div>
+<div class="card stat"><b>93.71%</b><i>EMNIST letters A–Z</i></div>
+<div class="card stat"><b>3.9×</b><i>smaller with int8</i></div>
+</div>
+
+<h2 class="v1">Neural network in Java (Man-JAVA)</h2>
+<div class="card v1"><p style="margin:0 0 10px">MiniDL is the library: a neural network toolkit in pure Java with no outside machine learning code. The handwriting recognition model below is one application built from its parts: the same layers, trainer, quantizer, file format and web server.</p>
+<div class="sc"><table><tr><th>Library part</th><th>What it gives</th></tr>
+<tr><td>Tensors and maths</td><td>matmul, broadcasting, reshape views, softmax, multi-thread kernels</td></tr>
+<tr><td>Layers</td><td>Dense, Conv2D, pooling, BatchNorm, LayerNorm, Dropout, LSTM, attention, Residual, Embedding</td></tr>
+<tr><td>Learning</td><td>Adam, AdamW, SGD, RMSProp, schedules, clipping, early stopping, autograd</td></tr>
+<tr><td>Deploy</td><td>int8 / int4 / bfloat16, binary files, safetensors, HTTP server</td></tr>
+<tr><td>Application</td><td><a href="#handwriting" style="color:var(--ac)">Handwriting recognition model (page 2)</a></td></tr></table></div></div>
+
+<div class="v2"><h2>Handwriting recognition model: the network</h2>
+<div class="card sc"><svg id="net" viewBox="0 0 900 250" width="900" role="img" aria-label="CNN architecture diagram"></svg>
+<p style="color:var(--mu);font-size:.9rem;margin:4px 0 0">A 28×28 picture goes through two convolution + pooling stages, then dense layers to 10 scores (0–9). Total: 27,562 weights (107.7 KB as float32).</p></div>
+<div class="card sc"><table id="arch"></table></div>
+
+<h2>2. Training curves</h2>
+<div class="card"><div class="tabs" id="tabs"></div><div class="sc"><svg id="curve" viewBox="0 0 700 300" width="700"></svg></div></div>
+
+<h2>3. Accuracy of all five models</h2>
+<div class="card sc"><svg id="bars" viewBox="0 0 700 260" width="700"></svg></div>
+<div class="card sc"><table id="models"></table></div>
+
+<h2>4. Digits: confusion matrix</h2>
+<div class="card sc"><svg id="cm" viewBox="0 0 520 520" width="520" role="img" aria-label="Confusion matrix"></svg>
+<p style="color:var(--mu);font-size:.9rem">Rows = true digit, columns = predicted. Brighter diagonal = correct. Most confusion: 9 predicted as 4 (6 times).</p></div>
+<div class="card sc"><table id="pc"></table></div>
+
+<h2>5. Shrinking the model (quantization)</h2>
+<div class="card sc"><svg id="q" viewBox="0 0 700 220" width="700"></svg></div>
+<div class="card sc"><table>
+<tr><th>Model</th><th>Weights KB</th><th>Accuracy</th><th>Time (s)</th></tr>
+<tr><td>float32</td><td>107.7</td><td>99.02%</td><td>0.54</td></tr>
+<tr><td>bfloat16 (Dense)</td><td>56.4</td><td>99.02%</td><td>0.61</td></tr>
+<tr><td>int8 (Dense + Conv)</td><td>27.6</td><td>98.99%</td><td>0.95</td></tr>
+<tr><td>int4 group 32 (Dense)</td><td>17.8</td><td>98.83%</td><td>0.89</td></tr></table></div>
+
+<h2>6. All 283 tests passed</h2>
+<p class="s" style="text-align:left;margin:0 0 8px">Output of <code>java -jar dist/minidl-1.4.0.jar tests</code>, grouped by area (representative checks shown).</p>
+<div class="card" id="tests"></div>
+
+<h2>7. Extras in this release</h2>
+<div class="card"><div class="chips" id="extras"></div></div>
+
+</div><div class="v1"><h2>MiniDL vs PyTorch: accuracy results</h2>
+<div class="card"><p style="margin:0">Same idea on both sides: the same CNN layers (digits model: 27,562 weights), same data, 8 epochs. MiniDL numbers come from your run. PyTorch results are filled in for all 5 models (from your Colab run, same CNN layers, 8 epochs). Digits+letters uses slightly different data in PyTorch, so compare that row with care, and times depend on the hardware each run used.</p></div>
+<div class="card sc"><table id="cmp"></table></div>
+<div class="card sc"><svg id="cacc" viewBox="0 0 700 340" width="700" role="img" aria-label="Accuracy comparison"></svg></div>
+<div class="card sc"><svg id="ctime" viewBox="0 0 700 340" width="700" role="img" aria-label="Training time comparison"></svg></div>
+</div><footer>MiniDL 1.4.0 · by <a href="https://github.com/manishn1877" style="color:var(--ac)">manishn1877</a> · <a href="https://github.com/manishn1877/minidl-java" style="color:var(--ac)">minidl-java</a></footer>
+</main>
+<script>
+const NS="http://www.w3.org/2000/svg",$=id=>document.getElementById(id);
+const cs=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function E(p,t,a,x){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(x!=null)e.textContent=x;p.appendChild(e);return e}
+function draw(){
+// network
+let s=$("net");s.innerHTML="";
+const L=[["Input","1×28×28",1],["Conv 3×3","8×26×26",8],["MaxPool","8×13×13",8],["Conv 3×3","16×11×11",16],["MaxPool","16×5×5",16],["Dense","64",6],["Output","10",10]];
+L.forEach((l,i)=>{const x=40+i*135,n=Math.min(l[2],6),h=n*28;
+ if(i<6){const nx=40+(i+1)*135;E(s,"line",{x1:x+30,y1:110,x2:nx-6,y2:110,stroke:cs("--ac2"),"stroke-width":2,class:"flow"})}
+ for(let k=0;k<(i==6?10:n);k++){const c=i==6?22:28,y=(i==6?0:(250-n*28)/2-20)+k*c+(i==6?10:10);
+  E(s,"rect",{x:x-(i==0?0:k*3),y:i==0?55:y,width:i==0?56:44,height:i==0?112:c-6,rx:5,fill:cs("--ac"),opacity:.25+.07*k+(i==6?.0:0),stroke:cs("--ac"),"stroke-width":1});
+  if(i==6)E(s,"text",{x:x+54,y:y+14,fill:cs("--mu"),"font-size":11},k)}
+ E(s,"text",{x:x+(i==6?0:22),y:232,"text-anchor":i==6?"start":"middle",fill:cs("--tx"),"font-size":12,"font-weight":600},l[0]);
+ E(s,"text",{x:x+(i==6?0:22),y:246,"text-anchor":i==6?"start":"middle",fill:cs("--mu"),"font-size":11},l[1])});
+// curves
+curve(cur);
+// bars
+const M=[["Digits 0-9",99.02],["Letters A-Z",93.71],["Digits+Letters",93.60],["A-Z a-z",85.23],["Full 62",86.02]];
+s=$("bars");s.innerHTML="";
+M.forEach((m,i)=>{const y=20+i*44;E(s,"text",{x:0,y:y+20,fill:cs("--tx"),"font-size":13},m[0]);
+ E(s,"rect",{x:130,y,width:540*m[1]/100,height:30,rx:6,fill:i?cs("--ac"):cs("--ac2")});
+ E(s,"text",{x:136+540*m[1]/100-10,y:y+20,"text-anchor":"end",fill:"#fff","font-size":13,"font-weight":700},m[1]+"%")});
+// confusion
+const C=[[976,0,1,0,0,0,2,1,0,0],[0,1127,3,0,1,0,2,1,1,0],[1,0,1024,1,0,0,0,4,2,0],[0,0,0,1001,0,6,0,1,2,0],[0,1,0,0,973,0,1,0,2,5],[0,0,0,5,0,885,1,0,0,1],[3,1,1,0,2,2,947,0,2,0],[0,1,4,3,0,0,0,1017,2,1],[1,0,2,1,0,1,1,1,967,0],[3,0,1,3,6,3,0,4,4,985]];
+s=$("cm");s.innerHTML="";
+for(let i=0;i<10;i++){E(s,"text",{x:40+i*47+23,y:20,"text-anchor":"middle",fill:cs("--mu"),"font-size":13},i);E(s,"text",{x:25,y:52+i*47,"text-anchor":"middle",fill:cs("--mu"),"font-size":13},i);
+ for(let j=0;j<10;j++){const v=C[i][j],o=i==j?.9:Math.min(1,.12+v/6);
+  E(s,"rect",{x:40+j*47,y:30+i*47,width:45,height:45,rx:4,fill:i==j?cs("--ok"):v?cs("--ac"):cs("--bd"),opacity:v?o:.35});
+  E(s,"text",{x:40+j*47+22,y:30+i*47+28,"text-anchor":"middle",fill:v?"#fff":cs("--mu"),"font-size":v>99?12:13},v)}}
+// quant
+const Q=[["float32",107.7],["bfloat16",56.4],["int8",27.6],["int4",17.8]];
+s=$("q");s.innerHTML="";
+Q.forEach((m,i)=>{const y=10+i*50;E(s,"text",{x:0,y:y+22,fill:cs("--tx"),"font-size":13},m[0]);
+ E(s,"rect",{x:90,y,width:540*m[1]/107.7,height:32,rx:6,fill:cs("--ac2"),opacity:1-i*.15});
+ E(s,"text",{x:98,y:y+21,fill:"#fff","font-size":13,"font-weight":700},m[1]+" KB")})}
+// curve data
+const D={"Digits":[[.42769,.17860,.13774,.11573,.10396,.09191,.08416,.08246],[.07738,.06525,.05491,.05160,.04568,.04454,.04256,.04269]],
+"Letters A-Z":[[.81979,.44782,.37531,.33467,.30353,.27999,.26694,.25980],[.27180,.23476,.22119,.20708,.18690,.18844,.18173,.18400]],
+"Digits+Letters":[[.86545,.46549,.37906,.32865,.29160,.26748,.25263,.24691],[.39212,.31217,.21549,.21746,.20316,.19073,.19958,.19383]],
+"A-Z a-z":[[1.03481,.65369,.58435,.54523,.51567,.48557,.47033,.45924],[.52544,.48062,.46369,.43816,.42879,.41857,.41645,.41449]],
+"Full 62":[[.87318,.59162,.53917,.50378,.47924,.45675,.44270,.43839],[.48914,.45857,.43226,.42263,.42842,.39835,.40214,.39722]]};
+let cur="Digits";
+function curve(k){const s=$("curve");s.innerHTML="";const [a,b]=D[k],mx=Math.max(...a)*1.05,X=i=>60+i*(600/7),Y=v=>260-v/mx*230;
+ for(let g=0;g<=4;g++){const v=mx*g/4;E(s,"line",{x1:60,x2:660,y1:Y(v),y2:Y(v),stroke:cs("--bd")});E(s,"text",{x:54,y:Y(v)+4,"text-anchor":"end",fill:cs("--mu"),"font-size":11},v.toFixed(2))}
+ a.forEach((_,i)=>E(s,"text",{x:X(i),y:280,"text-anchor":"middle",fill:cs("--mu"),"font-size":11},i+1));
+ E(s,"text",{x:360,y:296,"text-anchor":"middle",fill:cs("--mu"),"font-size":11},"epoch");
+ [[a,cs("--ac"),"train loss"],[b,cs("--ac2"),"validation loss"]].forEach(([d,c,n],j)=>{
+  E(s,"polyline",{points:d.map((v,i)=>X(i)+","+Y(v)).join(" "),fill:"none",stroke:c,"stroke-width":3});
+  d.forEach((v,i)=>E(s,"circle",{cx:X(i),cy:Y(v),r:3.5,fill:c}));
+  E(s,"rect",{x:400+j*130,y:6,width:12,height:12,rx:3,fill:c});E(s,"text",{x:416+j*130,y:16,fill:cs("--tx"),"font-size":12},n)})}
+const T=$("tabs");Object.keys(D).forEach(k=>{const b=document.createElement("button");b.textContent=k;if(k==cur)b.className="on";b.onclick=()=>{cur=k;[...T.children].forEach(x=>x.className=x.textContent==k?"on":"");curve(k)};T.appendChild(b)});
+// tables
+$("arch").innerHTML="<tr><th>Layer</th><th>Weights</th></tr>"+[["Conv2D 1→8, 3×3",80],["ReLU",0],["MaxPool2D 2×2",0],["Conv2D 8→16, 3×3",1168],["ReLU",0],["MaxPool2D 2×2",0],["Dense 400→64",25664],["ReLU",0],["Dropout 0.2",0],["Dense 64→10",650],["<b>TOTAL</b>","<b>27,562</b>"]].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+$("models").innerHTML="<tr><th>Model</th><th>Classes</th><th>Weights</th><th>Train time</th><th>Test accuracy</th><th>File</th></tr>"+[["Digits",10,"27,562","103 s","99.02%","107 KB"],["Letters A–Z",26,"110,682","427 s","93.71%","432 KB"],["Digits + letters",36,"111,972","1176 s","93.60%","437 KB"],["A–Z a–z",52,"168,628","448 s","85.23%","658 KB"],["Full 0–9 A–Z a–z",62,"170,558","957 s","86.02%","666 KB"]].map(r=>"<tr>"+r.map(c=>"<td>"+c+"</td>").join("")+"</tr>").join("");
+const P=[[.992,.996,.994,980],[.997,.993,.995,1135],[.988,.992,.990,1032],[.987,.991,.989,1010],[.991,.991,.991,982],[.987,.992,.989,892],[.993,.989,.991,958],[.988,.989,.989,1028],[.985,.993,.989,974],[.993,.976,.985,1009]];
+$("pc").innerHTML="<tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1</th><th>Count</th></tr>"+P.map((r,i)=>`<tr><td>${i}</td><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join("");
+const G=[["Matrix maths","matmul, optimized = textbook, transpose, softmax stays finite, multi-thread = single-thread"],
+["Gradient checks","Dense with Tanh/ReLU/LeakyReLU/GELU, Sigmoid, BatchNorm, LayerNorm, Conv2D, LSTM, ResNet, whole transformer"],
+["Losses & metrics","MSE, MAE, BCE, softmax cross-entropy, confusion matrix, R², train/test split"],
+["Optimizers","SGD, momentum, Adam, AdamW, RMSProp, weight decay, gradient clipping, step and cosine schedules"],
+["Layers","Dropout, BatchNorm, BatchNorm2D, MaxPool2D, AvgPool2D, Residual, Reshape, Embedding, causal attention, grouped / dilated / depthwise convolution"],
+["Training tools","early stopping with best-weights restore, normalizer, CSV and MNIST loaders, CIFAR and EMNIST loaders"],
+["Save & load","text and binary files, damaged-file errors, custom layer registry, safetensors export/import"],
+["Quantization & precision","int8, int4, bfloat16, FP16 (all 65,536 bit patterns), loss scaling, mixed-precision training"],
+["Autograd","24 operations checked, AutoDense / AutoLayerNorm / AutoAttention equal hand-written layers, full autograd transformer"],
+["Shape inference","CNN and transformer shape tracing with clear per-layer error messages"],
+["Handwriting recognizer","preprocessing, character segmentation, learn-from-corrections, A–Z and a–z case rules, 36 / 52 / 62-class models"],
+["Serving","batching, scale up/down, queue limits, HTTP API (predict, register, metrics, Prometheus), CORS safety"],
+["Text","BPE tokenizer round-trip, CharSource, TokenSource, tied weights language model"],
+["Data & augmentation","shift, rotation, mirror, colour-safe augmentation, memory-mapped data (1 byte per value)"]];
+$("tests").innerHTML=G.map(g=>`<details><summary>${g[0]} <span class="chip" style="margin-left:6px">pass</span></summary><p style="color:var(--mu);margin:6px 0 0">${g[1]}</p></details>`).join("")+`<p style="margin:12px 0 0"><b>Result: 283 passed, 0 failed</b></p>`;
+$("extras").innerHTML=["Data augmentation: shift ≤2 px, rotation ≤10°","Digits trained in 12.9 s per epoch","Test pass over 10,000 digits in 0.57 s","int8 model 3.86× smaller, accuracy 98.99%","Static site generated to docs/ with SVG charts","Local web recognizer on localhost:8080","5 models loaded in one server"].map(t=>`<span class="chip">${t}</span>`).join("");
+const NM=["Digits 0-9","Letters A-Z","Digits+Letters","A-Z a-z","Full 62"],MA=[99.02,93.71,93.60,85.23,86.02],MT=[103,427,1176,448,957];
+let PT={};
+const DEF={a0:"98.59",t0:"132",a1:"92.93",t1:"304",a2:"90.26",t2:"1707",a3:"85.69",t3:"966",a4:"86.6",t4:"1718"};for(const k in DEF)if(!PT[k])PT[k]=DEF[k];
+const num=v=>{const x=parseFloat(v);return isNaN(x)?null:x};
+function cmpInit(){const st='style="width:90px;padding:4px 6px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx)"';
+$("cmp").innerHTML="<tr><th>Model</th><th>MiniDL acc %</th><th>PyTorch acc %</th><th>Gap (pp)</th><th>MiniDL time s</th><th>PyTorch time s</th></tr>"+NM.map((m,i)=>`<tr><td>${m}</td><td>${MA[i]}</td><td>${PT["a"+i]}</td><td id="g${i}">-</td><td>${MT[i]}</td><td>${PT["t"+i]}</td></tr>`).join("");
+$("cmp").oninput=e=>{const k=e.target.dataset.k;if(!k)return;PT[k]=e.target.value;try{localStorage.setItem("pt2",JSON.stringify(PT))}catch(x){}cc()}}
+function gbars(id,a,b,lo,hi,u,tt){const s=$(id);s.innerHTML="";const n=a.length,gw=630/n,Y=v=>280-(v-lo)/(hi-lo)*230;
+E(s,"text",{x:60,y:20,fill:cs("--tx"),"font-size":13,"font-weight":700},tt);
+for(let g=0;g<=4;g++){const v=lo+(hi-lo)*g/4;E(s,"line",{x1:60,x2:690,y1:Y(v),y2:Y(v),stroke:cs("--bd")});E(s,"text",{x:54,y:Y(v)+4,"text-anchor":"end",fill:cs("--mu"),"font-size":11},Math.round(v*10)/10)}
+NM.forEach((m,i)=>{const x=60+i*gw;[a[i],b[i]].forEach((v,j)=>{if(v==null)return;const bx=x+gw*.1+j*gw*.4,y=Math.min(280,Math.max(50,Y(v)));E(s,"rect",{x:bx,y,width:gw*.36,height:280-y,rx:4,fill:j?cs("--ac2"):cs("--ac")});E(s,"text",{x:bx+gw*.18,y:y-5,"text-anchor":"middle",fill:cs("--tx"),"font-size":11},v+u)});
+E(s,"text",{x:x+gw/2,y:298,"text-anchor":"middle",fill:cs("--mu"),"font-size":11},m)});
+if(b.every(v=>v==null))E(s,"text",{x:375,y:160,"text-anchor":"middle",fill:cs("--mu"),"font-size":13},"Enter PyTorch results above to see the comparison");
+[["MiniDL",cs("--ac")],["PyTorch",cs("--ac2")]].forEach((l,j)=>{E(s,"rect",{x:250+j*110,y:318,width:12,height:12,rx:3,fill:l[1]});E(s,"text",{x:268+j*110,y:328,fill:cs("--tx"),"font-size":12},l[0])})}
+function cc(){if(!$("cmp").rows.length)return;const pa=NM.map((_,i)=>num(PT["a"+i])),pt=NM.map((_,i)=>num(PT["t"+i]));
+pa.forEach((v,i)=>{$("g"+i).textContent=v==null?"-":((v-MA[i]>=0?"+":"")+(v-MA[i]).toFixed(2))});
+gbars("cacc",MA,pa,80,100,"%","Test accuracy (%) - axis starts at 80");
+gbars("ctime",MT,pt,0,Math.max(...MT,...pt.filter(v=>v!=null))*1.1,"s","Training time for 8 epochs (seconds)")}
+function route(){document.body.dataset.v=location.hash==="#handwriting"?"2":"1";window.scrollTo(0,0);draw();cc()}cmpInit();route();addEventListener("hashchange",route);matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>draw());
+</script></body></html>
