@@ -54,7 +54,7 @@ public class HandwritingServer {
         if (args.length > 2) dataDir = args[2];
 
         if (which.equals("auto")) {
-            for (String f : new String[]{"alnum-cnn.bin", "emnist-letters-cnn.bin", "mnist-cnn-aug.bin"}) if (new File(f).exists()) addSlot(f);
+            for (String f : new String[]{"emnist-full-cnn.bin", "emnist-case-cnn.bin", "alnum-cnn.bin", "emnist-letters-cnn.bin", "mnist-cnn-aug.bin"}) if (new File(f).exists()) addSlot(f);
             if (!slots.containsKey("digits") && new File("mnist-cnn.bin").exists()) addSlot("mnist-cnn.bin");
         } else if (new File(which).exists()) {
             addSlot(which);
@@ -109,13 +109,16 @@ public class HandwritingServer {
         Slot s = new Slot();
         s.rec = new DigitRecognizer(model);
         s.file = file;
-        s.key = s.rec.classes == 36 ? "all" : s.rec.classes == 26 ? "letters" : "digits";
-        s.name = s.rec.classes == 36 ? "digits + letters" : s.rec.classes == 26 ? "letters A-Z" : "digits 0-9";
+        s.key = s.rec.classes == 62 ? "full" : s.rec.classes == 52 ? "case" : s.rec.classes == 36 ? "all" : s.rec.classes == 26 ? "letters" : "digits";
+        s.name = s.rec.classes == 62 ? "digits + letters (A-Z a-z)" : s.rec.classes == 52 ? "letters (A-Z a-z)" : s.rec.classes == 36 ? "digits + letters" : s.rec.classes == 26 ? "letters A-Z" : "digits 0-9";
         slots.put(s.key, s);
     }
 
     static String buildWarning() {
-        if (slots.containsKey("all")) return "";
+        boolean cased = slots.containsKey("full") || slots.containsKey("case");
+        if (slots.containsKey("all") || slots.containsKey("letters") || cased) {
+            return cased ? "" : "No model with capital AND small letters yet (a c and a C look the same to the merged A-Z model). Run ./train-all.sh to train the A-Z a-z model, then restart.";
+        }
         if (!slots.containsKey("letters"))
             return "Only the digits model is loaded (" + slots.get("digits").file + "), so everything you write is read as a digit: a letter becomes 8, 6, 0 ... "
                 + "Run ./train-all.sh (needs the data), then restart ./run-web.sh.";
@@ -151,6 +154,10 @@ public class HandwritingServer {
         if (dir == null) return null;
         String split = train ? "train" : "test", pre = train ? "train" : "t10k";
         int max = train ? 60000 : Integer.MAX_VALUE;
+        if (classes == 62 || classes == 52) {
+            String e = EmnistLoader.existsByClass(dir) ? dir : new File(dir, "emnist").getPath();
+            return EmnistLoader.existsByClass(e) ? EmnistLoader.byClass(e, split, train ? 60000 : 20000, classes == 52) : null;
+        }
         if (classes == 36) {
             String m = new File(dir, "mnist").getPath(), e = new File(dir, "emnist").getPath();
             return Alnum.exists(m, e) ? Alnum.load(m, e, split, max) : null;
@@ -239,6 +246,9 @@ public class HandwritingServer {
         int[] wh = new int[2];
         float[] ink = readInk(ex, q, wh);
         boolean multi = "multi".equals(q.get("mode")), tta = !"0".equals(q.get("tta"));
+        String caseMode = q.getOrDefault("case", "auto");
+        double refH = 0;
+        try { refH = Double.parseDouble(q.getOrDefault("ref", "0")); } catch (NumberFormatException e) { throw new IllegalArgumentException("ref must be a number"); }
         long t0 = System.nanoTime();
         List<DigitPreprocess.Piece> pieces = new ArrayList<>();
         if (multi) pieces = DigitPreprocess.segment(ink, wh[0], wh[1], s.rec.style(), px -> s.rec.predict(px, false).confidence);
@@ -246,8 +256,10 @@ public class HandwritingServer {
         StringBuilder digits = new StringBuilder(), text = new StringBuilder();
         for (DigitPreprocess.Piece p : pieces) {
             DigitRecognizer.Result r = s.rec.predict(p.pixels, tta);
+            LetterCase.Outcome oc = LetterCase.apply(s.rec.alphabet, r.probs, caseMode, p.h, refH); // capital or small, decided by size for look-alike letters
+            if (oc.note != null || oc.amb) r = new DigitRecognizer.Result(oc.probs);
             if (digits.length() > 0) digits.append(',');
-            digits.append(digitJson(s, p, r));
+            digits.append(digitJson(s, p, r, oc.amb, oc.note));
             text.append(r.confidence < 0.5 ? '?' : s.rec.alphabet.charAt(r.label));
         }
         double ms = (System.nanoTime() - t0) / 1e6;
@@ -270,7 +282,7 @@ public class HandwritingServer {
             rec1[DigitRecognizer.DIM] = (byte) label;
             f.write(rec1);
         }
-        send(ex, 200, "application/json", String.format("{\"loss\":%.4f,\"learned\":%d,\"digit\":%s}", loss, s.rec.learnedCount(), digitJson(s, p, s.rec.predict(p.pixels, true))));
+        send(ex, 200, "application/json", String.format("{\"loss\":%.4f,\"learned\":%d,\"digit\":%s}", loss, s.rec.learnedCount(), digitJson(s, p, s.rec.predict(p.pixels, true), false, null)));
     }
 
     static void save(HttpExchange ex) throws Exception {
@@ -298,9 +310,11 @@ public class HandwritingServer {
         return ink;
     }
 
-    static String digitJson(Slot s, DigitPreprocess.Piece p, DigitRecognizer.Result r) {
+    static String digitJson(Slot s, DigitPreprocess.Piece p, DigitRecognizer.Result r) { return digitJson(s, p, r, false, null); }
+
+    static String digitJson(Slot s, DigitPreprocess.Piece p, DigitRecognizer.Result r, boolean amb, String caseNote) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"label\":%d,\"ch\":\"%c\",\"conf\":%.4f,\"bits\":%.3f,\"note\":%s,\"probs\":[", p.x, p.y, p.w, p.h, r.label, s.rec.alphabet.charAt(r.label), r.confidence, r.entropyBits, p.note == null ? "null" : str(p.note)));
+        sb.append(String.format("{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"label\":%d,\"ch\":\"%c\",\"conf\":%.4f,\"bits\":%.3f,\"amb\":%b,\"note\":%s,\"probs\":[", p.x, p.y, p.w, p.h, r.label, s.rec.alphabet.charAt(r.label), r.confidence, r.entropyBits, amb, p.note != null ? str(p.note) : caseNote != null ? str(caseNote) : "null"));
         for (int i = 0; i < r.probs.length; i++) sb.append(i > 0 ? "," : "").append(String.format("%.4f", r.probs[i]));
         sb.append("],\"view\":[");
         for (int i = 0; i < p.pixels.length; i++) sb.append(i > 0 ? "," : "").append(Math.round(p.pixels[i] * 255));

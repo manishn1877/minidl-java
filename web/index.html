@@ -25,6 +25,7 @@ label{font-size:13px}
 .chip{font:600 13px var(--mono);border:2px solid var(--ink);padding:2px 8px;cursor:pointer;background:#fff}
 .chip.sel{border-color:var(--red);color:var(--red)}
 .chip.unsure{border-style:dashed}
+.chip.wait{opacity:.5}
 #warn{grid-column:1/-1;background:#fff3cd;border:2px solid var(--ink);padding:8px 12px;font:13px var(--mono)}
 #models{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;font:12px var(--mono)}
 .bar{display:grid;grid-template-columns:16px 1fr 46px;gap:6px;align-items:center;font:12px var(--mono);margin:2px 0}
@@ -43,10 +44,12 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
   <div id="models"></div>
   <div class="stage"><canvas id="c" width="720" height="320"></canvas><canvas id="o" width="720" height="320"></canvas></div>
   <div class="row">
-    <button id="mSingle" class="on">one character</button><button id="mMulti">many (number / word)</button>
+    <button id="mSingle" class="on" title="write one character; it is recognised and the canvas clears by itself">one character (auto-clear)</button><button id="mLine" title="each character is locked once recognised and never changes">line (locks each character)</button><button id="mMulti" title="recognise everything on the canvas at once (photos, scans)">scan (whole drawing)</button>
     <button id="clear">clear</button><button id="undo">undo</button>
     <label>pen <input id="brush" type="range" min="8" max="40" value="20"></label>
     <label><input id="tta" type="checkbox" checked> steadier (averages 5 nudged views)</label>
+    <label>lock after pause <input id="delay" type="range" min="250" max="1500" step="50" value="600"> <span id="delayv">0.6 s</span></label>
+    <span id="caseBox" hidden>case: <button id="cAuto" class="on">auto</button><button id="cUp">ABC</button><button id="cLow">abc</button></span>
   </div>
   <div class="row">
     <button id="up">load a photo/scan</button><input id="file" type="file" accept="image/*" hidden>
@@ -57,7 +60,7 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
 
 <section class="side">
   <div class="card">
-    <div id="answer">-</div><div id="meta"></div>
+    <div id="answer">-</div><div id="hist" style="font:13px var(--mono);min-height:18px;opacity:.8"></div><div id="meta"></div>
     <div class="chips" id="chips"></div>
     <div id="bars"></div>
     <h2>what the model sees (28x28)</h2><canvas id="view" width="28" height="28"></canvas>
@@ -78,7 +81,7 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
 <section id="about" style="max-width:1000px;margin:0 auto;padding:0 16px 40px;font:13px/1.5 var(--mono)">
   <h2>about</h2>
   <p>MiniDL is a deep learning library written only in Java: tensors, backpropagation, convolutions, ResNet, LSTM, transformers, a model server. This page is its handwriting demo. The page draws; the Java program recognises.</p>
-  <p>Run it: <code>./run-web.sh</code> or <code>java -jar minidl-1.3.0.jar web</code>, then open <code>http://localhost:8080</code>. Source and instructions: <a href="https://github.com/manishn1877/minidl-java">github.com/manishn1877/minidl-java</a>.</p>
+  <p>Run it: <code>./run-web.sh</code> or <code>java -jar minidl-1.4.0.jar web</code>, then open <code>http://localhost:8080</code>. Source and instructions: <a href="https://github.com/manishn1877/minidl-java">github.com/manishn1877/minidl-java</a>.</p>
   <img src="mnist-training.svg" alt="training curves" style="max-width:100%" onerror="this.remove()">
 </section>
 <script>
@@ -92,76 +95,136 @@ const api=(p,o={})=>fetch(base()+p,Object.assign({},o,{headers:Object.assign({'X
 function offline(){
   const w=$('#warn');w.hidden=false;
   w.innerHTML='Cannot reach the MiniDL Java server at <b>'+(API||location.origin)+'</b>. This page only draws: the recognising is done by the Java program on your computer. '
-   +'Start it with <code>java -jar minidl-1.3.0.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
+   +'Start it with <code>java -jar minidl-1.4.0.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
    +'<br>Server address: <input id="srv" size="24" value="'+(API||'http://localhost:8080')+'"> <button id="conn">connect</button>'
    +' <small>(Safari may block an https page from calling http://localhost: open the address the server prints instead.)</small>';
-  $('#conn').onclick=()=>{API=$('#srv').value.trim();try{localStorage.setItem('minidlServer',API)}catch(e){}cur='';info().then(predict)};
+  $('#conn').onclick=()=>{API=$('#srv').value.trim();try{localStorage.setItem('minidlServer',API)}catch(e){}cur='';info().then(()=>{locked.forEach(e=>recog(e));previewLater(60)})};
   $('#info').textContent='not connected';
 }
-let abc='0123456789', cur='', models=[], prac=false, tgt='', pool=[], got=0, tried=0, mode='single', drawing=false, last=[], sel=0, text='', ms=0, timer=0, seq=0, undo=[];
+let abc='0123456789', cur='', models=[], prac=false, tgt='', pool=[], got=0, tried=0, mode='single', caseMode='auto';
+let drawing=false, undo=[], locked=[], nid=0, abox=null, lockTimer=0, previewTimer=0, previewSeq=0, live=null, lastCrop=null, lastRes=null, history='', sel=0, scanRes=[], scanText='', ms=0, scanSeq=0;
+const act=document.createElement('canvas'); act.width=W; act.height=H;
+const actx=act.getContext('2d',{willReadFrequently:true});   // ONLY the strokes of the character being written; finished characters are never in here
+const clearAct=()=>{actx.clearRect(0,0,W,H);abox=null};
 const blank=()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H)}; blank();
 const say=t=>{$('#msg').textContent=t};
-const later=t=>{clearTimeout(timer);timer=setTimeout(predict,t)};
 const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
+const delay=()=>+$('#delay').value;
+const hasCases=()=>abc.indexOf('a')>=0&&abc.indexOf('A')>=0;
+const lineText=()=>locked.slice().sort((p,q)=>(p.x+p.w/2)-(q.x+q.w/2)).map(e=>e.res?(e.res.conf<0.5?'?':e.over||e.res.ch):'…').join('');
+const refH=skip=>locked.reduce((m,e)=>e!==skip&&e.res?Math.max(m,e.h):m,0);   // height of the tallest OTHER character on the line
+
+// ---- drawing: every stroke goes to the visible canvas AND to the "active" layer
+function stroke(c,x,y,first){c.fillStyle=c.strokeStyle='#111';c.lineWidth=+$('#brush').value;c.lineCap=c.lineJoin='round';
+  if(first){c.beginPath();c.arc(x,y,c.lineWidth/2,0,7);c.fill();c.beginPath();c.moveTo(x,y)}else{c.lineTo(x,y);c.stroke();c.beginPath();c.moveTo(x,y)}}
+function grow(x,y){const r=+$('#brush').value/2;abox=abox?{x0:Math.min(abox.x0,x-r),y0:Math.min(abox.y0,y-r),x1:Math.max(abox.x1,x+r),y1:Math.max(abox.y1,y+r)}:{x0:x-r,y0:y-r,x1:x+r,y1:y+r}}
+function snapshot(){undo.push({vis:ctx.getImageData(0,0,W,H),act:actx.getImageData(0,0,W,H),locked:locked.map(e=>Object.assign({},e)),abox:abox&&Object.assign({},abox),history});if(undo.length>20)undo.shift()}
 
 cv.addEventListener('contextmenu',e=>e.preventDefault());
-cv.addEventListener('pointerdown',e=>{e.preventDefault();cv.setPointerCapture(e.pointerId);undo.push(ctx.getImageData(0,0,W,H));if(undo.length>20)undo.shift();
-  drawing=true;const[x,y]=pos(e);ctx.fillStyle=ctx.strokeStyle='#111';ctx.lineWidth=+$('#brush').value;ctx.lineCap=ctx.lineJoin='round';
-  ctx.beginPath();ctx.arc(x,y,ctx.lineWidth/2,0,7);ctx.fill();ctx.beginPath();ctx.moveTo(x,y);later(500)});
-cv.addEventListener('pointermove',e=>{if(!drawing)return;const[x,y]=pos(e);ctx.lineTo(x,y);ctx.stroke();ctx.beginPath();ctx.moveTo(x,y);later(300)});
-['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{if(drawing){drawing=false;later(60)}}));
+cv.addEventListener('pointerdown',e=>{e.preventDefault();cv.setPointerCapture(e.pointerId);
+  const [x,y]=pos(e);
+  // no guessing from position: the strokes of one letter (H, E, M, 4 ...) can be far apart. Only the pause (or Enter) finishes a character.
+  clearTimeout(lockTimer);snapshot();drawing=true;
+  stroke(ctx,x,y,true);stroke(actx,x,y,true);grow(x,y);previewLater(400)});
+cv.addEventListener('pointermove',e=>{if(!drawing)return;const [x,y]=pos(e);stroke(ctx,x,y,false);stroke(actx,x,y,false);grow(x,y);previewLater(300)});
+['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{if(!drawing)return;drawing=false;previewLater(60);armLock()}));
+function armLock(){clearTimeout(lockTimer);if(prac||mode==='scan'||mode==='multi')return;lockTimer=setTimeout(lockActive,delay())}
 
+// ---- ink of the active character, cropped to its box (+ margin); the server recognises exactly this
+function cropActive(){
+  if(!abox)return null;
+  const m=6,x0=Math.max(0,Math.floor(abox.x0)-m),y0=Math.max(0,Math.floor(abox.y0)-m),x1=Math.min(W,Math.ceil(abox.x1)+m),y1=Math.min(H,Math.ceil(abox.y1)+m);
+  const w=Math.max(16,x1-x0),h=Math.max(16,y1-y0),d=actx.getImageData(x0,y0,Math.min(w,W-x0),Math.min(h,H-y0)),dw=d.width,ink=new Uint8Array(w*h);
+  let any=0;for(let y=0;y<d.height;y++)for(let x=0;x<dw;x++){const v=d.data[(y*dw+x)*4+3];ink[y*w+x]=v;if(v>40)any++}
+  return any>6?{x:x0,y:y0,w,h,ink}:null}
+const q=(c,extra='')=>`api/predict?model=${cur}&w=${c.w}&h=${c.h}&mode=single&tta=${$('#tta').checked?1:0}&case=${caseMode}${extra}`;
+async function recognizeCrop(c,ref){const r=await api(q(c,'&ref='+Math.round(ref||0)),{method:'POST',body:c.ink});const j=await r.json();if(j.error)throw new Error(j.error);return j.digits[0]||null}
+
+// ---- LOCK: the finished character is recognised once, then frozen (box, label, picture) and never looked at again by later strokes
+function lockActive(){
+  clearTimeout(lockTimer);clearTimeout(previewTimer);
+  const c=cropActive();clearAct();
+  if(!c){return}
+  lastCrop=c;
+  if(mode==='single'){finishSingle(c);return}
+  const e={id:++nid,crop:c,x:c.x,y:c.y,w:c.w,h:c.h,res:null,over:null,ver:0};locked.push(e);sel=e.id;render();recog(e)}
+async function recog(e,ref){
+  const my=++e.ver;
+  try{const d=await recognizeCrop(e.crop,ref===undefined?refH(e):ref);if(my!==e.ver||!locked.includes(e))return;
+    if(!d)return void locked.splice(locked.indexOf(e),1);
+    e.res=d;e.x=e.crop.x+d.x;e.y=e.crop.y+d.y;e.w=d.w;e.h=d.h;render();rejudgeCases()}
+  catch(err){offline()}}
+function rejudgeCases(){const t=refH(null);locked.forEach(e=>{if(e.res&&e.res.amb&&!e.over&&Math.abs((e.refUsed||0)-t)>1){e.refUsed=t;recog(e,t)}})}
+async function finishSingle(c){
+  try{const d=await recognizeCrop(c,0);if(!d)return;lastRes=d;live=null;history+=(d.conf<0.5?'?':d.ch);
+    render();setTimeout(()=>{if(!abox&&!drawing){blankAll(true)}},450)}catch(err){offline()}}  // show the result, then the canvas clears BY ITSELF
+
+// ---- live guess for the character being written (side panel only; nothing is locked by this)
+function previewLater(t){clearTimeout(previewTimer);if(mode==='scan'||mode==='multi'){previewTimer=setTimeout(scanPredict,t);return}previewTimer=setTimeout(preview,t)}
+async function preview(){const c=cropActive(),my=++previewSeq;if(!c){live=null;render();return}
+  try{const d=await recognizeCrop(c,refH(null));if(my!==previewSeq)return;live=d;render()}catch(err){offline()}}
 function getInk(){const d=ctx.getImageData(0,0,W,H).data,ink=new Uint8Array(W*H);let any=false;
   for(let i=0;i<ink.length;i++){const v=255-d[i*4];ink[i]=v;if(v>40)any=true}return any?ink:null}
+async function scanPredict(){const ink=getInk(),my=++scanSeq;
+  if(!ink){scanRes=[];scanText='';render();return}
+  try{const r=await api(`api/predict?model=${cur}&w=${W}&h=${H}&mode=multi&tta=${$('#tta').checked?1:0}`,{method:'POST',body:ink});
+    const j=await r.json();if(my!==scanSeq)return;if(j.error){say(j.error);return}scanRes=j.digits;scanText=j.text;ms=j.ms;render()}catch(e){offline()}}
 
-async function predict(){
-  const ink=getInk(), my=++seq;
-  if(!ink){last=[];text='';render();return}
-  try{
-    const r=await api(`api/predict?model=${cur}&w=${W}&h=${H}&mode=${mode}&tta=${$('#tta').checked?1:0}`,{method:'POST',body:ink});
-    const j=await r.json(); if(my!==seq)return; if(j.error){say(j.error);return}
-    last=j.digits;text=j.text;ms=j.ms;sel=Math.min(sel,Math.max(0,last.length-1));render();
-  }catch(e){offline()}
-}
-
+function selected(){if(mode==='line'){const e=locked.find(x=>x.id===sel)||locked[locked.length-1];return e&&e.res?e.res:null}if(mode==='single')return live||lastRes;return scanRes[Math.min(sel,Math.max(0,scanRes.length-1))]}
 function render(){
+  const scan=mode==='scan'||mode==='multi';
+  const text=scan?scanText:mode==='line'?lineText():(live?live.ch:lastRes?(lastRes.conf<0.5?'?':lastRes.ch):'');
   $('#answer').textContent=text||'-';
-  $('#meta').textContent=last.length?`${ms} ms · ${last.length} character${last.length>1?'s':''}`:'draw something';
+  $('#hist').textContent=mode==='single'&&history?'typed so far: '+history:'';
+  const n=scan?scanRes.length:mode==='line'?locked.length:(abox||lastRes?1:0);
+  $('#meta').textContent=n?(scan?`${ms} ms · `:'')+`${n} character${n>1?'s':''}`+(mode==='line'?' · locked: they will not change':''):'draw something';
   $('#chips').innerHTML='';
-  if(mode==='multi')last.forEach((d,i)=>{const c=document.createElement('span');c.className='chip'+(i===sel?' sel':'')+(d.conf<0.8?' unsure':'');c.title=d.note||(d.conf<0.8?'not sure: this one is a guess':'');
-    c.textContent=`${d.ch} ${Math.round(d.conf*100)}%${d.note?' ⚠':''}`;c.onclick=()=>{sel=i;render()};$('#chips').append(c)});
-  const d=last[sel], bars=$('#bars'); bars.innerHTML='';
+  const list=scan?scanRes.map((d,i)=>({d,i,id:i})):mode==='line'?locked.slice().sort((p,q)=>(p.x+p.w/2)-(q.x+q.w/2)).map(e=>({d:e.res,i:e.id,id:e.id,e})):[];
+  list.forEach(({d,id,e})=>{const c=document.createElement('span');c.className='chip'+(id===(scan?sel:sel)?' sel':'')+(!d?' wait':d.conf<0.8?' unsure':'');
+    c.title=d?(d.note||(d.conf<0.8?'not sure: this one is a guess':'')):'recognising...';
+    c.textContent=d?`${(e&&e.over)||d.ch} ${Math.round(d.conf*100)}%${d.note&&!/^case/.test(d.note)?' ⚠':''}${d.amb&&!d.note&&!(e&&e.over)?' ?':''}`:'…';c.onclick=()=>{sel=id;render()};$('#chips').append(c)});
+  const d=selected(), bars=$('#bars'); bars.innerHTML='';
   if(d)d.probs.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).slice(0,6).forEach(([p,i])=>{const b=document.createElement('div');b.className='bar'+(i===d.label?' top':'');
     b.innerHTML=`<span>${abc[i]}</span><div><i style="width:${(p*100).toFixed(1)}%"></i></div><span>${(p*100).toFixed(1)}%</span>`;bars.append(b)});
   const v=$('#view').getContext('2d'), im=v.createImageData(28,28);
   for(let i=0;i<784;i++){const g=d?255-d.view[i]:255;im.data.set([g,g,g,255],i*4)}v.putImageData(im,0,0);
-  oc.clearRect(0,0,W,H);oc.lineWidth=3;oc.font='700 26px ui-monospace,monospace';
-  last.forEach((q,i)=>{oc.strokeStyle=oc.fillStyle=i===sel?'#d7263d':'rgba(215,38,61,.55)';oc.strokeRect(q.x-6,q.y-6,q.w+12,q.h+12);oc.fillText(q.ch,q.x-6,Math.max(24,q.y-12))});
-  $('#teachBox').hidden=!(mode==='single'&&last.length&&!prac);
+  // boxes: finished characters are drawn from their STORED boxes (red, solid), the one being written is dashed grey. Nothing recomputes an old box.
+  oc.clearRect(0,0,W,H);oc.lineWidth=3;oc.font='700 26px ui-monospace,monospace';oc.setLineDash([]);
+  const boxes=scan?scanRes.map((q,i)=>({x:q.x,y:q.y,w:q.w,h:q.h,t:q.ch,on:i===sel,ok:true})):mode==='line'?locked.map(e=>({x:e.x,y:e.y,w:e.w,h:e.h,t:e.res?(e.over||e.res.ch):'…',on:e.id===sel,ok:!!e.res})):[];
+  boxes.forEach(b=>{oc.setLineDash(b.ok?[]:[6,5]);oc.strokeStyle=oc.fillStyle=b.ok?(b.on?'#d7263d':'rgba(215,38,61,.7)'):'#888';oc.strokeRect(b.x-6,b.y-6,b.w+12,b.h+12);oc.fillText(b.t,b.x-6,Math.max(24,b.y-12))});
+  if(abox&&!scan){oc.setLineDash([4,4]);oc.strokeStyle='#4a6fa5';oc.lineWidth=2;oc.strokeRect(abox.x0-4,abox.y0-4,abox.x1-abox.x0+8,abox.y1-abox.y0+8)}
+  $('#teachBox').hidden=!((mode==='line'&&locked.length||mode==='single'&&(lastRes||live))&&!prac);
+  $('#caseBox').hidden=!hasCases();
 }
 
-function setMode(m){mode=m;sel=0;$('#mSingle').classList.toggle('on',m==='single');$('#mMulti').classList.toggle('on',m==='multi');predict()}
-$('#mSingle').onclick=()=>setMode('single');$('#mMulti').onclick=()=>setMode('multi');
-$('#clear').onclick=()=>{undo.push(ctx.getImageData(0,0,W,H));blank();say('');predict()};
-$('#undo').onclick=()=>{if(undo.length){ctx.putImageData(undo.pop(),0,0);predict()}};
-$('#tta').onchange=predict;
-addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='c')$('#clear').click();if(e.key==='z')$('#undo').click()});
+function setMode(m){mode=m;sel=0;clearTimeout(lockTimer);['Single','Line','Multi'].forEach(k=>$('#m'+k).classList.toggle('on',(k==='Single'&&m==='single')||(k==='Line'&&m==='line')||(k==='Multi'&&m==='scan')));
+  blankAll(true);say(m==='single'?'Write one character. It is recognised and the canvas clears by itself.':m==='line'?'Write characters one after another. Each is LOCKED once recognised; clear to start again.':'Scan: everything on the canvas is recognised together.')}
+$('#mSingle').onclick=()=>setMode('single');$('#mLine').onclick=()=>setMode('line');$('#mMulti').onclick=()=>setMode('scan');
+function blankAll(keepHistory){clearTimeout(lockTimer);clearTimeout(previewTimer);++previewSeq;++scanSeq;blank();clearAct();locked.forEach(e=>e.ver++);locked=[];live=null;scanRes=[];scanText='';if(!keepHistory)history='';if(mode!=='single')lastRes=null;render()}
+$('#clear').onclick=()=>{snapshot();blankAll(false);lastRes=null;lastCrop=null;say('');render()};
+$('#undo').onclick=()=>{const s=undo.pop();if(!s)return;clearTimeout(lockTimer);locked.forEach(e=>e.ver++);ctx.putImageData(s.vis,0,0);actx.putImageData(s.act,0,0);locked=s.locked;abox=s.abox;history=s.history;live=null;render();previewLater(60);if(abox)armLock()};
+$('#tta').onchange=()=>{locked.forEach(e=>recog(e));previewLater(60)};
+$('#delay').oninput=()=>{$('#delayv').textContent=(delay()/1000).toFixed(2).replace(/0$/,'')+' s'};
+function setCase(m){caseMode=m;[['auto','cAuto'],['upper','cUp'],['lower','cLow']].forEach(([k,id])=>$('#'+id).classList.toggle('on',k===m));locked.forEach(e=>{e.over=null;recog(e)});previewLater(60)}
+$('#cAuto').onclick=()=>setCase('auto');$('#cUp').onclick=()=>setCase('upper');$('#cLow').onclick=()=>setCase('lower');
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='c')$('#clear').click();if(e.key==='z')$('#undo').click();if(e.key==='Enter'&&!prac&&abox)lockActive()});
 
 function buildTeach(){$('#teach').innerHTML='';[...abc].forEach((c,i)=>{const b=document.createElement('button');b.textContent=c;b.onclick=()=>teach(i);$('#teach').append(b)})}
 async function teach(n){
-  const ink=getInk(); if(!ink)return;
-  const r=await api(`api/learn?model=${cur}&w=${W}&h=${H}&label=${n}`,{method:'POST',body:ink}), j=await r.json();
+  const e=mode==='line'?(locked.find(x=>x.id===sel)||locked[locked.length-1]):null, c=e?e.crop:lastCrop;
+  if(!c)return;
+  const r=await api(`api/learn?model=${cur}&w=${c.w}&h=${c.h}&label=${n}`,{method:'POST',body:c.ink}), j=await r.json();
   if(j.error){say(j.error);return}
-  last=[j.digit];text=j.digit.ch;render();
+  if(e){recog(e,refH(e))}else{lastRes=j.digit;live=null;history=history.slice(0,-1)+j.digit.ch;render()}
   say(`learned a "${abc[n]}" (${j.learned} correction${j.learned>1?'s':''} so far). Now it says ${j.digit.ch} at ${Math.round(j.digit.conf*100)}%.`);info();
 }
 $('#save').onclick=async()=>{const j=await (await api('api/save?model='+cur,{method:'POST'})).json();say(j.error||'saved to '+j.saved)};
-$('#reset').onclick=async()=>{await api('api/reset?model='+cur,{method:'POST'});say('model reset to its original weights');info();predict()};
+$('#reset').onclick=async()=>{await api('api/reset?model='+cur,{method:'POST'});say('model reset to its original weights');info();locked.forEach(e=>recog(e));previewLater(60)};
 
 $('#up').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image();img.onload=()=>{
-  undo.push(ctx.getImageData(0,0,W,H));blank();const s=Math.min(W/img.width,H/img.height),w=img.width*s,h=img.height*s;
-  ctx.drawImage(img,(W-w)/2,(H-h)/2,w,h);cleanPhoto();predict()};img.src=URL.createObjectURL(f);e.target.value=''};
+  setMode('scan');snapshot();blank();const s=Math.min(W/img.width,H/img.height),w=img.width*s,h=img.height*s;
+  ctx.drawImage(img,(W-w)/2,(H-h)/2,w,h);cleanPhoto();scanPredict()};img.src=URL.createObjectURL(f);e.target.value=''};
 function cleanPhoto(){ // photos of paper: find the background grey, flip if the ink is lighter, then stretch contrast
   const im=ctx.getImageData(0,0,W,H),d=im.data,hist=new Array(256).fill(0);
   for(let i=0;i<d.length;i+=4){const g=(d[i]+d[i+1]+d[i+2])/3|0;d[i]=g;hist[g]++}
@@ -171,27 +234,27 @@ function cleanPhoto(){ // photos of paper: find the background grey, flip if the
     const g=255-Math.min(255,dark*1.4);d[i]=d[i+1]=d[i+2]=g;d[i+3]=255}
   ctx.putImageData(im,0,0)}
 
-function pick(k){cur=k;const m=models.find(x=>x.key===k);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo();predict()}
+function pick(k){cur=k;const m=models.find(x=>x.key===k);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo();locked.forEach(e=>{e.over=null;recog(e)});lastRes=null;previewLater(60);if(mode==='scan')scanPredict();render()}
 function showInfo(){const m=models.find(x=>x.key===cur);if(!m)return;
   $('#info').textContent=`${m.name} · ${m.file} · ${m.params.toLocaleString()} weights`+(m.testAcc>=0?` · ${m.testAcc.toFixed(2)}% on unseen test pictures`:'')+(m.learned?` · ${m.learned} corrections`:'');
   $('#models').innerHTML='<span>model:</span>';models.forEach(x=>{const b=document.createElement('button');b.textContent=x.name;b.className=x.key===cur?'on':'';b.onclick=()=>pick(x.key);$('#models').append(b)})}
 async function info(){try{const j=await (await fetch(base()+'api/info')).json();models=j.models;if(!cur)cur=j.default;
   const w=$('#warn');w.hidden=!j.warning;w.textContent=j.warning||'';
-  const m=models.find(x=>x.key===cur);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo()}catch(e){offline()}}
+  const m=models.find(x=>x.key===cur);if(m&&m.alphabet!==abc){abc=m.alphabet;buildTeach();pool=[];nextTarget()}showInfo();render()}catch(e){offline()}}
 
 function nextTarget(){if(!pool.length)pool=[...abc].sort(()=>Math.random()-.5);tgt=pool.pop();$('#target').textContent=tgt}
 function showScore(){$('#score').textContent=tried?`before learning from you, the model was right on ${got} of ${tried}. ${pool.length} left in this round.`:'it learns from each drawing you submit'}
 async function submit(){
-  const ink=getInk(); if(!ink||!tgt)return;
-  const q=`model=${cur}&w=${W}&h=${H}`, idx=abc.indexOf(tgt);
-  const p=await (await api(`api/predict?${q}&mode=single&tta=0`,{method:'POST',body:ink})).json();
-  if(p.digits&&p.digits[0]){tried++;if(p.digits[0].ch===tgt)got++}
-  const j=await (await api(`api/learn?${q}&label=${idx}`,{method:'POST',body:ink})).json();
+  const c=cropActive(); if(!c||!tgt)return;
+  const idx=abc.indexOf(tgt);
+  const p=await recognizeCrop(c,0);
+  if(p){tried++;if(p.ch===tgt)got++}
+  const j=await (await api(`api/learn?model=${cur}&w=${c.w}&h=${c.h}&label=${idx}`,{method:'POST',body:c.ink})).json();
   if(j.error){say(j.error);return}
-  blank();undo=[];last=[];text='';render();nextTarget();showScore();info();
+  blankAll(true);undo=[];nextTarget();showScore();info();
 }
 $('#prac').onclick=()=>{prac=!prac;$('#prac').classList.toggle('on',prac);$('#pracBox').hidden=!prac;if(prac){setMode('single');nextTarget();showScore()}render()};
-$('#submit').onclick=submit;$('#skip').onclick=()=>{nextTarget();$('#clear').click()};
+$('#submit').onclick=submit;$('#skip').onclick=()=>{nextTarget();blankAll(true)};
 addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Enter'&&prac)submit()});
-info();render();
+info();render();say('Write one character. It is recognised and the canvas clears by itself.');
 </script></body></html>

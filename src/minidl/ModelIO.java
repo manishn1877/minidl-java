@@ -37,6 +37,7 @@ public final class ModelIO {
             Sequential m = new Sequential();
             if (n < 0 || n > MAX_LAYERS) throw new IOException("corrupt model file: " + n + " layers");
             for (int i = 0; i < n; i++) m.add(buildSafe(r.readLine(), rnd));
+            bindTied(m);
             readWeights(m, r);
             return m;
         }
@@ -82,6 +83,21 @@ public final class ModelIO {
     /** Teach loadModel about your own layer type. The name is the first word of the layer's spec(). */
     public static void register(String name, LayerFactory factory) { REGISTRY.put(name, factory); }
 
+    /** Connects every TiedOutput to the model's Embedding (weight tying is not stored as a link in the file, only as the layer description). */
+    private static void bindTied(Sequential m) throws IOException {
+        Embedding emb = null;
+        for (Layer l : m.layers()) if (l instanceof Embedding) { emb = (Embedding) l; break; }
+        for (Layer l : m.layers()) bindIn(l, emb);
+    }
+
+    private static void bindIn(Layer l, Embedding emb) throws IOException {
+        if (l instanceof TiedOutput) {
+            if (emb == null) throw new IOException("corrupt model file: a TiedOutput layer but no Embedding");
+            try { ((TiedOutput) l).bindTo(emb); } catch (IllegalArgumentException e) { throw new IOException("corrupt model file: " + e.getMessage(), e); }
+        } else if (l instanceof TokenWise) for (Layer c : ((TokenWise) l).inner()) bindIn(c, emb);
+        else if (l instanceof Residual) for (Layer c : ((Residual) l).inner()) bindIn(c, emb);
+    }
+
     private static final int MAX_LAYERS = 100_000, MAX_DIM = 1 << 27;
 
     /**
@@ -119,6 +135,7 @@ public final class ModelIO {
             case "GELU":       return new Activations.GELU();
             case "Dropout":    return new Dropout(Double.parseDouble(t[1]), rnd);
             case "BatchNorm":  return new BatchNorm(i(t[1]), Double.parseDouble(t[2]));
+            case "TiedOutput": return new TiedOutput(i(t[1]), i(t[2]));
             case "BatchNorm2D": return new BatchNorm2D(i(t[1]), i(t[2]), i(t[3]), Double.parseDouble(t[4]));
             case "LSTM":       return new LSTM(i(t[1]), i(t[2]), i(t[3]), t[4].equals("1"), rnd);
             case "LayerNorm":  return new LayerNorm(i(t[1]));
@@ -192,6 +209,7 @@ public final class ModelIO {
             Sequential m = new Sequential();
             if (n < 0 || n > MAX_LAYERS) throw new IOException("corrupt model file: " + n + " layers");
             for (int k = 0; k < n; k++) m.add(buildSafe(in.readUTF(), rnd));
+            bindTied(m);
             List<Param> ps = m.params();
             if (in.readInt() != ps.size()) throw new IOException("parameter count mismatch");
             for (Param p : ps) readBin(in, p.value);

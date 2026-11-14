@@ -12,12 +12,14 @@ import java.util.Random;
  */
 public class CharTransformerDemo {
     static int T = 32;                  // context window (characters or tokens): option --context
+    static boolean TIE = false;         // option --tie: the output layer shares its weights with the input embedding (weight tying)
     static double DROPOUT = 0.0;        // option --dropout: randomly switches off this share of the numbers while training (0 = off)
     static final int D = 64, HEADS = 4, LAYERS = 2, BATCH = 32;
 
     /** Embedding -> (attention block, MLP block) x LAYERS -> LayerNorm -> Dense -> one row per character. */
     static Sequential buildModel(int V, Random rnd) {
-        Sequential m = new Sequential().add(new Embedding(V, D, T, rnd));
+        Embedding emb = new Embedding(V, D, T, rnd);
+        Sequential m = new Sequential().add(emb);
         for (int l = 0; l < LAYERS; l++) {
             if (DROPOUT > 0) {
                 m.add(new Residual(new TokenWise(T, D, new LayerNorm(D)), new CausalSelfAttention(T, D, HEADS, rnd), new Dropout(DROPOUT, rnd)));
@@ -27,7 +29,7 @@ public class CharTransformerDemo {
                 m.add(new Residual(new TokenWise(T, D, new LayerNorm(D), new Dense(D, 4 * D, rnd), new Activations.GELU(), new Dense(4 * D, D, rnd))));
             }
         }
-        m.add(new TokenWise(T, D, new LayerNorm(D), new Dense(D, V, rnd)));
+        m.add(new TokenWise(T, D, new LayerNorm(D), TIE ? new TiedOutput(emb) : new Dense(D, V, rnd)));
         m.add(new Reshape(V));
         return m;
     }
@@ -46,9 +48,10 @@ public class CharTransformerDemo {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
-            System.out.println("usage: java -cp out minidl.CharTransformerDemo <text file> [steps=1500] [--bpe VOCAB] [--context T] [--dropout P]\n"
+            System.out.println("usage: java -cp out minidl.CharTransformerDemo <text file> [steps=1500] [--bpe VOCAB] [--context T] [--dropout P] [--tie]\n"
                 + "  --bpe VOCAB   read sub-word tokens (byte-pair encoding, vocabulary of VOCAB) instead of single characters\n"
                 + "  --context T   how many characters/tokens the model sees at once (default 32)\n"
+                + "  --tie         the output layer shares its weights with the input embedding (fewer weights)\n"
                 + "  --dropout P   switch off a share P (for example 0.1) of the numbers while training, against over-fitting");
             return;
         }
@@ -59,6 +62,7 @@ public class CharTransformerDemo {
                 case "--bpe": bpeVocab = Integer.parseInt(args[++i]); break;
                 case "--context": T = Integer.parseInt(args[++i]); break;
                 case "--dropout": DROPOUT = Double.parseDouble(args[++i]); break;
+                case "--tie": TIE = true; break;
                 default: steps = Integer.parseInt(args[i]);
             }
         }

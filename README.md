@@ -1587,9 +1587,10 @@ Done items are ticked. Phases 1 to 3 are complete; Phases 4 to 6 are partly done
 **Phase 4: advanced**
 - [x] Attention layer and a tiny transformer; character-level text generator on Tiny Shakespeare
 - [x] **Recurrent layer / LSTM** for sequences (`LSTM`, full backpropagation through time, gradient-checked; learns to remember the first of 6 numbers: 99% on new data)
+- [x] **Capital and small letters**: `EmnistDemo <folder> 8 200000 aug case` (A-Z a-z, 52 classes) and `... full` (0-9 A-Z a-z, 62 classes) from the EMNIST "byclass" files. `LetterCase` decides capital or small for look-alike letters (c C, o O, s S, v V, w W, x X, z Z, k K, p P, u U) by size against the tallest letter on the line. **Trained and tested only on synthetic font data here** (EMNIST could not be downloaded); real accuracy unknown
 - [x] **Sub-word tokenizer** (`BpeTokenizer`) now **wired into the transformer demo**: `CharTransformerDemo shakespeare.txt 400 --bpe 400` (Tiny Shakespeare, 1.1M characters = 533,487 tokens; 400 steps in 109 s took the validation loss from 5.99 (random guessing) to 4.12 per token; the samples are rough, the run was short)
 - [x] **Dropout** (`--dropout 0.1`) and a **configurable context window** (`--context 64`) in the transformer demo
-- [ ] Weight tying (the same matrix as input embedding and output layer): needs shared parameters, which the framework does not have yet
+- [x] **Weight tying** (`TiedOutput`: the output layer reads the input embedding table; `CharTransformerDemo ... --tie`). Gradient-checked, save/load reconnects the tie, a tied model learns a rule. On Tiny Shakespeare (BPE 400, 400 steps) it saves 25,600 weights but was slightly worse after only 400 steps (validation 4.27 vs 4.12 per token): tying usually pays off in longer runs, which were not done
 - [x] **Batch normalization for convolutions** (`BatchNorm2D`) and a **ResNet-style model** (`ResNet.build`; MNIST: 97.60% on the 10,000 test digits after 4 epochs on only 12,000 training images)
 - [ ] Train the ResNet on CIFAR-10 and see whether it passes 85% (`CifarDemo <folder> 8 aug 50000 resnet`; **not run: no CIFAR data was available when this was built**)
 - [ ] GPU through native bindings (very hard, very impressive)
@@ -1603,7 +1604,7 @@ Done items are ticked. Phases 1 to 3 are complete; Phases 4 to 6 are partly done
 
 **Phase 5: polish for recruiters**
 - [x] CI file (Java 17 and 21: tests, jars, version check). It runs when you push; check the Actions tab
-- [x] Plots of training vs validation loss (`docs/mnist-training.svg`, drawn by the Java class `Plot` from the real logs in `docs/logs`: `java -jar dist/minidl-1.3.0.jar plot`)
+- [x] Plots of training vs validation loss (`docs/mnist-training.svg`, drawn by the Java class `Plot` from the real logs in `docs/logs`: `java -jar dist/minidl-1.4.0.jar plot`)
 - [x] GitHub Pages site (`SiteBuilder`, section 21)
 - [ ] Record a 2-minute demo of MNIST training in a 256 MB limit, and of the text generator (needs a screen recording: not possible to make here)
 
@@ -1750,10 +1751,10 @@ Built by Manish Gowda N.
 ## 18. Use it as a library, jar and Maven
 
 ```
-./build-jar.sh                       # dist/minidl-1.3.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
-java -jar dist/minidl-1.3.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
+./build-jar.sh                       # dist/minidl-1.4.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
+java -jar dist/minidl-1.4.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
 ```
-In your own project, put `minidl-1.3.0.jar` on the classpath (`javac -cp minidl-1.3.0.jar MyApp.java`) and `import minidl.*;`.
+In your own project, put `minidl-1.4.0.jar` on the classpath (`javac -cp minidl-1.4.0.jar MyApp.java`) and `import minidl.*;`.
 With Maven: `mvn verify` compiles, runs the test suite and builds the jars (`pom.xml`, no dependencies); `mvn install` puts it in your local repository, then:
 ```xml
 <dependency><groupId>io.github.manishn1877</groupId><artifactId>minidl</artifactId><version>1.2.0</version></dependency>
@@ -1770,10 +1771,11 @@ Draw in the browser and the model reads it live. Pure Java on the server (the JD
 java -Xmx512m -cp out minidl.EmnistDemo emnist 8 124800 aug     # train the letters model
 ./run-web.sh letters         # letters A-Z, uses emnist-letters-cnn.bin
 ```
-Then open http://localhost:8080. `./run-web.sh` loads every trained model it finds and the page has buttons to switch between **digits+letters**, **letters** and **digits**. If the digits+letters or letters model is missing, a banner says so (a digits-only model can only answer with digits, so it reads an `H` as `4`). Check the labels with your own eyes once: `java -jar dist/minidl-1.3.0.jar check-data emnist mnist`.
+Then open http://localhost:8080. `./run-web.sh` loads every trained model it finds and the page has buttons to switch between **digits+letters**, **letters** and **digits**. If the digits+letters or letters model is missing, a banner says so (a digits-only model can only answer with digits, so it reads an `H` as `4`). Check the labels with your own eyes once: `java -jar dist/minidl-1.4.0.jar check-data emnist mnist`.
 
 What it does:
-- **One character or many.** "Many" mode finds each character as its own blob of ink, so close writing works (`2310` with 2 px between digits). Touching characters are cut at a pinch in the ink if the model reads both halves well; characters with a doubtful split show a warning mark, uncertain ones a dashed border. Limits: characters whose strokes truly overlap are often read as one (a joined `10` looks like a `0` to the model). See CHANGELOG.md.
+- **Three ways to write.** *One character (auto-clear)*: write a character, it is recognised, shown, added to a "typed so far" line, and the canvas clears by itself. *Line (locks each character)*: after a short pause (slider, default 0.6 s, or Enter) the character you just wrote is recognised ONCE and LOCKED: its red box, label and picture are frozen and later strokes can never merge with it or move it, even if you write on top of it. The line reads left to right; clear starts again. *Scan*: the old whole-drawing mode for photos and scans. The next bullet describes how scan finds characters.
+- **Scan mode.** It finds each character as its own blob of ink, so close writing works (`2310` with 2 px between digits). Touching characters are cut at a pinch in the ink if the model reads both halves well; characters with a doubtful split show a warning mark, uncertain ones a dashed border. Limits: characters whose strokes truly overlap are often read as one (a joined `10` looks like a `0` to the model). See CHANGELOG.md.
 - **Preprocessing that matches the training data** (`DigitPreprocess`). Digits (MNIST style): crop to the ink, longer side 20 px, centre by centre of mass. Letters (EMNIST style): longer side 24 px, centred by bounding box. A 99% model reads a small or off-centre drawing badly without this. The page shows "what the model sees".
 - **Steadier answers** (`DigitRecognizer`): optional test-time augmentation averages the answer over the picture nudged 1 px in four directions.
 - **Teach it.** If it is wrong, press the right character. The model takes a few small training steps on your drawing, mixed with earlier corrections and real training pictures (so it does not forget the rest). Corrections are appended to `feedback.bin` / `feedback-letters.bin` (784 pixel bytes + 1 label byte each). "save tuned model" writes `<model>-tuned.bin`; "reset model" restores the original weights.
@@ -1787,15 +1789,15 @@ Limits: one user at a time is the intended use (corrections change the one share
 
 **Digits AND letters in one model (36 classes: 0-9, A-Z).** `./train-all.sh` also trains `alnum-cnn.bin` (`AlnumDemo`), and `./run-web.sh all` opens the page with it, so one drawing like `K7B2` is read in one go. `Alnum` puts MNIST digits and EMNIST letters into one shuffled data set, re-making every digit in the EMNIST style so the model sees one kind of picture. Pairs that look the same (0/O, 1/I, 2/Z, 5/S, 8/B) can only be guessed from the shape and the writer's habit, so expect a few more mix-ups than with the two separate models. If you know it is a number, use the digits page.
 
-Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. the full suite is 266 tests.
+Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. the full suite is 283 tests.
 
 ## 19. Model server (Phase 6)
 
 Serve any saved MiniDL model over HTTP, with the ideas of the Java part of DJL Serving (analysis: `docs/DJL-ANALYSIS.md`). Pure Java, no libraries.
 
 ```
-java -jar dist/minidl-1.3.0.jar serve                       # serves every *.bin in this folder
-java -jar dist/minidl-1.3.0.jar serve --port 8080 --model digits=mnist-cnn-aug.bin,batch=32,delay=5,workers=1,max_workers=4,queue=500
+java -jar dist/minidl-1.4.0.jar serve                       # serves every *.bin in this folder
+java -jar dist/minidl-1.4.0.jar serve --port 8080 --model digits=mnist-cnn-aug.bin,batch=32,delay=5,workers=1,max_workers=4,queue=500
 curl localhost:8080/ping
 curl -X POST localhost:8080/predictions/digits -d '{"inputs": [[0.0, 0.1, ...784 numbers...]]}'
 ```
@@ -1840,8 +1842,8 @@ follow the PyTorch documentation. Try one file from your PyTorch model and tell 
 
 The handwriting page is `web/index.html`; the Java server serves it. GitHub Pages can only host files, not run Java, so on Pages the page
 **draws and the Java program on your own computer recognises**:
-1. Turn on Pages: repository Settings, Pages, branch `main`, folder `/docs`. Build the site files with `java -jar dist/minidl-1.3.0.jar site` and commit `docs/`.
-2. On your computer run `./run-web.sh` (or `java -jar dist/minidl-1.3.0.jar web`).
+1. Turn on Pages: repository Settings, Pages, branch `main`, folder `/docs`. Build the site files with `java -jar dist/minidl-1.4.0.jar site` and commit `docs/`.
+2. On your computer run `./run-web.sh` (or `java -jar dist/minidl-1.4.0.jar web`).
 3. Open the Pages address. The page finds the server at `http://localhost:8080` (or the address you type and press connect).
 
 Problems fixed in 1.3.0 (found by reading the page against how Pages works; if you saw others, tell me what you saw):
@@ -1851,3 +1853,15 @@ Problems fixed in 1.3.0 (found by reading the page against how Pages works; if y
 - When the server cannot be reached the page now says so, shows how to start it, and has a box to type the server address (remembered).
 - Phones: the canvas no longer scrolls the page, selects text or opens the long-press menu while drawing; keyboard shortcuts no longer fire while typing in the address box.
 Not tested in a real browser (none available here): the headers and paths are tested with an HTTP client; the page itself was only read and checked for broken references.
+
+## 22. Capital and small letters, and the new writing modes (1.4.0)
+
+**Models** (the page lists every model it finds; the broadest opens first): `emnist-full-cnn.bin` digits + A-Z + a-z (62 classes), `emnist-case-cnn.bin` A-Z + a-z (52), `alnum-cnn.bin` digits + merged letters (36), `emnist-letters-cnn.bin` merged letters (26), `mnist-cnn-aug.bin` digits (10).
+Train the new ones with `./get-emnist.sh` (also downloads the byclass files; that download link was not checked) and `./train-all.sh`, or one at a time:
+`java -Xmx2g -cp out minidl.EmnistDemo emnist 8 200000 aug case` (or `full`). Check the labels first: `java -jar dist/minidl-1.4.0.jar check-data emnist --byclass`.
+
+**Why capital vs small is hard.** EMNIST scales every picture to the same size, so a `c` and a `C` look identical to the model. The page therefore gives the server the height of the tallest other character on the line (`ref`), and `LetterCase` calls a look-alike letter *small* when it is under 68% of that height, otherwise *capital*. Letters with different shapes (b B, d D, e E ...) are left to the model. A letter with nothing to compare to is marked `?`. The **case** buttons (auto / ABC / abc) override it. Limit: a line made only of small letters has no tall letter to compare to, so use the abc button.
+
+**Locking.** The character being written lives on its own layer; the red boxes of finished characters are drawn from stored coordinates and are never recomputed. The page asks the server about one character at a time (cropped to its own ink), so what you write next can not change an earlier answer. The position of a new stroke is NOT used to decide that a character is finished (the strokes of an H or an M can be far apart): only the pause or Enter does. If two characters merge, lower the pause slider; if one letter splits in two (E, H), raise it.
+
+Tested: the case rule, byclass loader, alphabets, server parameters and safety rules in Java (17 tests); the page's behaviour (3218 written close together, a new character drawn on top of locked ones, clear, auto-clear and history, case buttons) in a simulated browser with a real canvas against the real server. Not tested in a real browser or on a phone.

@@ -72,6 +72,8 @@ public class Tests {
         serving();
         phase4();
         javaOnly();
+        cased();
+        tying();
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
@@ -2087,5 +2089,129 @@ public class Tests {
             java.net.http.HttpResponse<String> p = call.apply(new String[]{"POST", "/api/predict?w=16&h=16&mode=single", ok, "1", "x"});
             check("web: a POST with the header works (a blank canvas gives no digits)", p.statusCode() == 200 && p.body().contains("\"digits\":[]"));
         } finally { web.stop(0); HandwritingServer.slots.clear(); tiny.delete(); dir.delete(); }
+    }
+
+    // ---------------------------------------------------------------- capital + small letters (52 / 62 classes)
+    static void cased() throws Exception {
+        String cased = EmnistLoader.CASED, full = EmnistLoader.FULL;
+        check("alphabet: 52 classes are A-Z then a-z; 62 classes are 0-9, A-Z, a-z (class 10 = A, 36 = a, 61 = z)",
+            cased.length() == 52 && cased.charAt(0) == 'A' && cased.charAt(25) == 'Z' && cased.charAt(26) == 'a' && cased.charAt(51) == 'z'
+            && full.length() == 62 && full.charAt(9) == '9' && full.charAt(10) == 'A' && full.charAt(36) == 'a' && full.charAt(61) == 'z');
+
+        // byclass files built by hand: labels 0-9 digits, 10-35 A-Z, 36-61 a-z; pictures stored sideways
+        File img = File.createTempFile("bc-img", ".idx"), lab = File.createTempFile("bc-lab", ".idx");
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(img))) {
+            o.writeInt(2051); o.writeInt(4); o.writeInt(28); o.writeInt(28);
+            for (int i = 0; i < 4; i++) { byte[] a = new byte[784]; a[5 * 28 + 2] = (byte) (100 + i); o.write(a); } // stored row 5, col 2 -> upright row 2, col 5
+        }
+        try (DataOutputStream o = new DataOutputStream(new FileOutputStream(lab))) { o.writeInt(2049); o.writeInt(4); o.write(new byte[]{3, 10, 36, 61}); }
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("byclass");
+        java.nio.file.Files.copy(img.toPath(), dir.resolve("emnist-byclass-test-images-idx3-ubyte"));
+        java.nio.file.Files.copy(img.toPath(), dir.resolve("emnist-byclass-train-images-idx3-ubyte"));
+        java.nio.file.Files.copy(lab.toPath(), dir.resolve("emnist-byclass-test-labels-idx1-ubyte"));
+        ByteSource f62 = EmnistLoader.byClass(dir.toString(), "test", 100, false), f52 = EmnistLoader.byClass(dir.toString(), "test", 100, true);
+        Tensor t62 = f62.targets(new int[]{0, 1, 2, 3}, 0, 4), t52 = f52.targets(new int[]{0, 1, 2}, 0, 3);
+        check("byclass: 62 classes keep the labels (3, 10 = A, 36 = a, 61 = z) and turn the pictures upright",
+            t62.cols == 62 && t62.get(0, 3) == 1 && t62.get(1, 10) == 1 && t62.get(2, 36) == 1 && t62.get(3, 61) == 1 && f62.features(new int[]{0}, 0, 1).get(0, 2 * 28 + 5) > 0.3);
+        check("byclass: letters only drops the digit and shifts the labels (A = 0, a = 26, z = 51), 52 classes",
+            f52.size() == 3 && t52.cols == 52 && t52.get(0, 0) == 1 && t52.get(1, 26) == 1 && t52.get(2, 51) == 1);
+        check("byclass: the files are found", EmnistLoader.existsByClass(dir.toString()) && !EmnistLoader.existsByClass(System.getProperty("java.io.tmpdir") + "/nothing-here"));
+
+        Random r = new Random(6);
+        DigitRecognizer r62 = new DigitRecognizer(new Sequential().add(new Dense(784, 8, r)).add(new Activations.ReLU()).add(new Dense(8, 62, r)));
+        DigitRecognizer r52 = new DigitRecognizer(new Sequential().add(new Dense(784, 8, r)).add(new Activations.ReLU()).add(new Dense(8, 52, r)));
+        check("recognizer: 62 outputs = digits + both cases, 52 outputs = both cases, with the EMNIST preprocessing", r62.alphabet.equals(full) && r52.alphabet.equals(cased) && r62.style() == DigitPreprocess.Style.EMNIST);
+
+        // the case rule
+        double[] p = new double[62];
+        p[full.indexOf('c')] = 0.9; p[full.indexOf('C')] = 0.06; p[full.indexOf('e')] = 0.04;
+        LetterCase.Outcome small = LetterCase.apply(full, p, "auto", 40, 100), big = LetterCase.apply(full, p, "auto", 90, 100), alone = LetterCase.apply(full, p, "auto", 90, 0);
+        check("case rule: a c-shaped letter 40% as tall as the tallest letter is small (c), 90% as tall is capital (C), the size merges both probabilities",
+            full.charAt(small.label) == 'c' && full.charAt(big.label) == 'C' && small.probs[full.indexOf('c')] > 0.95 && big.probs[full.indexOf('C')] > 0.95 && small.note.contains("small") && big.note.contains("capital"));
+        check("case rule: with nothing to compare to the model's guess stays and the answer is marked ambiguous", full.charAt(alone.label) == 'c' && alone.amb && alone.note == null);
+        double[] q = new double[62];
+        q[full.indexOf('b')] = 0.8; q[full.indexOf('B')] = 0.2;
+        LetterCase.Outcome notAmb = LetterCase.apply(full, q, "auto", 30, 100);
+        check("case rule: b and B have different shapes, so the model decides and the size rule is not used", full.charAt(notAmb.label) == 'b' && !notAmb.amb && notAmb.note == null);
+        LetterCase.Outcome up = LetterCase.apply(full, p, "upper", 40, 100), low = LetterCase.apply(full, p, "lower", 90, 100);
+        double[] z = new double[62]; z[full.indexOf('c')] = 0.5; z[full.indexOf('C')] = 0.3; z[full.indexOf('7')] = 0.2;
+        LetterCase.Outcome lowOnly = LetterCase.apply(full, z, "lower", 90, 100), upOnly = LetterCase.apply(full, z, "upper", 90, 100);
+        check("case rule: forcing upper or lower removes the other case but keeps digits",
+            full.charAt(up.label) == 'C' && full.charAt(low.label) == 'c' && full.charAt(lowOnly.label) == 'c' && full.charAt(upOnly.label) == 'C' && upOnly.probs[full.indexOf('c')] == 0 && lowOnly.probs[full.indexOf('7')] > 0);
+        double[] digitsOnly = new double[10]; digitsOnly[4] = 1;
+        check("case rule: a model without both cases is left alone", LetterCase.apply("0123456789", digitsOnly, "auto", 50, 100).label == 4 && !LetterCase.hasBothCases(EmnistLoader.LETTERS) && LetterCase.hasBothCases(full));
+
+        // server: models are filed by size, and the case parameters work over HTTP
+        File dirm = java.nio.file.Files.createTempDirectory("cased-store").toFile();
+        HandwritingServer.slots.clear();
+        for (int n : new int[]{52, 62}) {
+            File fm = new File(dirm, "m" + n + ".bin");
+            ModelIO.saveBinary(new Sequential().add(new Dense(784, 6, r)).add(new Activations.ReLU()).add(new Dense(6, n, r)), fm.getPath());
+            HandwritingServer.addSlot(fm.getPath());
+        }
+        check("server: a 52-class model is filed as 'case' and a 62-class one as 'full' (" + HandwritingServer.slots.keySet() + ")", HandwritingServer.slots.keySet().containsAll(java.util.Arrays.asList("case", "full")));
+        HandwritingServer.defaultKey = "full";
+        com.sun.net.httpserver.HttpServer web = HandwritingServer.startHttp(0);
+        try {
+            java.net.http.HttpClient hc = java.net.http.HttpClient.newHttpClient();
+            byte[] ink = new byte[40 * 40];
+            for (int y = 8; y < 32; y++) for (int x = 16; x < 24; x++) ink[y * 40 + x] = (byte) 255;
+            String base = "http://127.0.0.1:" + web.getAddress().getPort();
+            java.util.function.Function<String, java.net.http.HttpResponse<String>> post = path -> {
+                try { return hc.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + path)).header("X-MiniDL", "1").POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(ink)).build(), java.net.http.HttpResponse.BodyHandlers.ofString()); }
+                catch (Exception e) { throw new RuntimeException(e); }
+            };
+            java.net.http.HttpResponse<String> up1 = post.apply("/api/predict?model=full&w=40&h=40&mode=single&case=upper&ref=30"), lo1 = post.apply("/api/predict?model=full&w=40&h=40&mode=single&case=lower&ref=30"), bad = post.apply("/api/predict?model=full&w=40&h=40&ref=abc");
+            check("server: case and ref parameters are accepted, the answer says 'amb', a bad ref is a 400", up1.statusCode() == 200 && lo1.statusCode() == 200 && up1.body().contains("\"amb\":") && bad.statusCode() == 400);
+            java.util.regex.Matcher m1 = java.util.regex.Pattern.compile("\"ch\":\"(.)\"").matcher(up1.body()), m2 = java.util.regex.Pattern.compile("\"ch\":\"(.)\"").matcher(lo1.body());
+            check("server: forcing upper never answers a small letter, forcing lower never answers a capital", m1.find() && !Character.isLowerCase(m1.group(1).charAt(0)) && m2.find() && !Character.isUpperCase(m2.group(1).charAt(0)));
+        } finally { web.stop(0); HandwritingServer.slots.clear(); }
+    }
+
+    // ---------------------------------------------------------------- weight tying (output layer shares the embedding table)
+    static void tying() throws Exception {
+        final int V = 7, D = 4, T = 3;
+        Random r = new Random(17);
+        Embedding emb = new Embedding(V, D, T, r);
+        Sequential tied = new Sequential().add(emb).add(new TokenWise(T, D, new LayerNorm(D), new TiedOutput(emb))).add(new Reshape(V));
+        Sequential untied = new Sequential().add(new Embedding(V, D, T, r)).add(new TokenWise(T, D, new LayerNorm(D), new Dense(D, V, r))).add(new Reshape(V));
+        Tensor ids = new Tensor(4, T);
+        for (int i = 0; i < ids.data.length; i++) ids.data[i] = r.nextInt(V);
+        Tensor target = Tensor.randn(4 * T, V, 1.0, r);
+        check("gradcheck weight tying: the embedding table gets the gradient from the input AND the output side", GradCheck.maxRelativeError(tied, new Losses.MSE(), ids, target) < GC_TOL_DEEP);
+        check("weight tying saves exactly V x D + V weights (the output matrix and its bias): " + tied.paramCount() + " instead of " + untied.paramCount(), untied.paramCount() - tied.paramCount() == V * D + V);
+
+        File f = File.createTempFile("tied", ".bin");
+        tied.setTraining(false);
+        Tensor before = tied.predict(ids);
+        ModelIO.saveBinary(tied, f.getPath());
+        Sequential back = ModelIO.loadModelBinary(f.getPath(), new Random(1));
+        back.setTraining(false);
+        Tensor after = back.predict(ids);
+        double diff = 0;
+        for (int i = 0; i < before.data.length; i++) diff = Math.max(diff, Math.abs(before.data[i] - after.data[i]));
+        back.setTraining(true);
+        check("tied model: save + load gives identical predictions, the tie is reconnected (still passes the gradient check), max diff " + diff,
+            diff < 1e-6 && GradCheck.maxRelativeError(back, new Losses.MSE(), ids, target) < GC_TOL_DEEP);
+        f.delete();
+
+        // a model with a tied output learns: the next token after k is (k + 1) mod 5
+        int n = 5, steps = 4, len = 400;
+        int[] seq = new int[len];
+        for (int i = 0; i < len; i++) seq[i] = i % n;
+        TokenSource src = TokenSource.of(seq, n, steps);
+        Embedding e2 = new Embedding(n, 8, steps, new Random(3));
+        Sequential lm = new Sequential().add(e2).add(new TokenWise(steps, 8, new LayerNorm(8), new TiedOutput(e2))).add(new Reshape(n));
+        new Trainer().epochs(40).batchSize(16).seed(1).fit(lm, src, new Losses.SoftmaxCrossEntropy(), new Optimizers.Adam(0.05));
+        lm.setTraining(false);
+        Tensor probe = new Tensor(1, steps, new float[]{0, 1, 2, 3});
+        Tensor out = lm.predict(probe);
+        boolean right = true;
+        for (int t = 0; t < steps; t++) {
+            int best = 0;
+            for (int v = 1; v < n; v++) if (out.get(t, v) > out.get(t, best)) best = v;
+            right &= best == (t + 1) % n;
+        }
+        check("a language model with tied weights learns the rule 'next token = this one + 1' (all " + steps + " positions right)", right);
     }
 }

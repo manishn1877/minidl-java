@@ -8,6 +8,7 @@ import java.io.IOException;
  *
  *   java -cp out minidl.DataCheck &lt;emnist-folder&gt;                 letters only (26 classes, A-Z)
  *   java -cp out minidl.DataCheck &lt;emnist-folder&gt; &lt;mnist-folder&gt;   digits + letters as the combined model sees them (36 classes)
+ *   java -cp out minidl.DataCheck &lt;emnist-folder&gt; --byclass            the 62 classes with capital and small letters (0-9, A-Z, a-z)
  *
  * If a picture does not look like the character printed above it, the label mapping or the picture direction is wrong:
  * do not train until it is fixed. (EMNIST letters: labels 1..26 = A..Z, pictures stored sideways; EmnistLoader corrects both.)
@@ -19,7 +20,8 @@ public final class DataCheck {
         if (args.length < 1) { System.out.println("usage: java -cp out minidl.DataCheck <emnist-folder> [mnist-folder]"); return; }
         ByteSource src;
         String chars;
-        if (args.length > 1) { src = Alnum.load(args[1], args[0], "test", 6000); chars = Alnum.CHARS; }
+        if (args.length > 1 && args[1].equals("--byclass")) { src = EmnistLoader.byClass(args[0], "test", 30000, false); chars = EmnistLoader.FULL; }
+        else if (args.length > 1) { src = Alnum.load(args[1], args[0], "test", 6000); chars = Alnum.CHARS; }
         else { src = EmnistLoader.lettersFrom(args[0], "test", Integer.MAX_VALUE); chars = EmnistLoader.LETTERS; }
         byte[] px = src.copyPixels(), lab = src.copyLabels();
         int classes = chars.length();

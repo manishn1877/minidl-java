@@ -16,7 +16,7 @@ import java.util.Random;
 public class DigitRecognizer {
     public static final int DIM = DigitPreprocess.SIZE * DigitPreprocess.SIZE;
     public static final String DIGITS = "0123456789", LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    /** What the model can answer with (10 outputs = digits, 26 = letters, 36 = digits and letters) and how to prepare a drawing for it. */
+    /** What the model can answer with (10 outputs = digits, 26 = letters, 36 = digits and letters, 52 = capital and small letters, 62 = digits and both cases) and how to prepare a drawing for it. */
     public final String alphabet;
     public final int classes;
 
@@ -44,7 +44,7 @@ public class DigitRecognizer {
         this.model = model;
         this.original = model.snapshot();
         this.classes = model.predict(new Tensor(1, DIM)).cols;
-        this.alphabet = classes == 36 ? Alnum.CHARS : classes == 26 ? LETTERS : DIGITS.substring(0, Math.min(classes, 10));
+        this.alphabet = classes == 62 ? EmnistLoader.FULL : classes == 52 ? EmnistLoader.CASED : classes == 36 ? Alnum.CHARS : classes == 26 ? LETTERS : DIGITS.substring(0, Math.min(classes, 10));
     }
 
     public DigitPreprocess.Style style() { return classes >= 26 ? DigitPreprocess.Style.EMNIST : DigitPreprocess.Style.MNIST; }

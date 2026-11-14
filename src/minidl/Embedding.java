@@ -15,12 +15,18 @@ public class Embedding implements Layer {
     private final int V, D, T;
     private final Param tok, pos;
     private Tensor ids;
+    private TiedOutput tied; // an output layer that shares the token table (weight tying), or null
 
     public Embedding(int vocab, int dim, int steps, Random rnd) {
         this.V = vocab; this.D = dim; this.T = steps;
         tok = new Param(Tensor.randn(vocab, dim, 0.1, rnd), false);
         pos = new Param(Tensor.randn(steps, dim, 0.1, rnd), false);
     }
+
+    int vocab() { return V; }
+    int dim() { return D; }
+    Tensor tokenTable() { return tok.value; }
+    void tie(TiedOutput t) { this.tied = t; }
 
     @Override public Tensor forward(Tensor x) {
         if (x.cols != T) throw new IllegalArgumentException("Embedding expects " + T + " ids per row, got " + x.cols);
@@ -45,6 +51,7 @@ public class Embedding implements Layer {
                 int o = (n * T + t) * D, a = id * D, b = t * D;
                 for (int d = 0; d < D; d++) { tok.grad.data[a + d] += g.data[o + d]; pos.grad.data[b + d] += g.data[o + d]; }
             }
+        if (tied != null && tied.gE != null) for (int i = 0; i < tok.grad.data.length; i++) tok.grad.data[i] += tied.gE[i]; // the output layer's share (its backward ran first)
         return null; // nothing before the embedding needs a gradient
     }
 

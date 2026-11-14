@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.0 - character locking, auto-clear, capital + small letters, weight tying
+
+### Web page
+- **Single mode clears itself** after each recognised character (the answer stays on screen and is added to "typed so far").
+- **Line mode locks each character**: after a pause (slider, default 0.6 s) or Enter, the character is recognised once and frozen (box, label, picture). New strokes cannot merge with it, move it, or change its box, even when drawn over it. Order is left to right. Clear starts again.
+- Scan mode keeps the old whole-drawing recognition (used for photos).
+- Teach (correct a wrong answer) works on a locked character; switching models re-reads the locked characters.
+- Found while testing: choosing the end of a character by the position of the next stroke split an H into three pieces, so only the pause decides.
+
+### Capital and small letters
+- `EmnistLoader.byClass` (62 classes, or the 52 letters), `EmnistDemo ... letters|case|full`, alphabets for 52 and 62 classes, servers files them as `case` / `full`, `check-data --byclass`.
+- `LetterCase`: look-alike letters (c C, o O, s S, v V, w W, x X, z Z, k K, p P, u U) get their case from their size against the tallest character on the line; case buttons auto / ABC / abc; the answer is marked `amb` when the case is only a guess.
+- Only tested on synthetic font data (the EMNIST download is blocked in the build environment): the pipeline works, real accuracy is unknown.
+
+### Phase 4
+- **Weight tying**: `TiedOutput` shares the embedding table with the output layer; `CharTransformerDemo --tie`. Gradient-checked; save/load reconnects it; learns a rule. Short Tiny Shakespeare run: 25,600 fewer weights, validation 4.27 vs 4.12 per token (slightly worse after 400 steps).
+- Still open: CIFAR-10 ResNet training (no data), GPU. Phase 5: demo recording. Phase 6: check SafeTensors against a file written by real PyTorch.
+
+### Tests: 283 (was 266). New: byclass loader, alphabets, case rule, server case parameters, weight tying (4).
+
 ## 1.3.0 - Java only, website fixes, Phase 4 leftovers
 
 ### Java only
