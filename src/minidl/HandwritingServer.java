@@ -68,13 +68,13 @@ public class HandwritingServer {
             ModelIO.saveBinary(m, which);
             addSlot(which);
         }
-        if (slots.isEmpty()) {
+        if (slots.isEmpty() && !which.equals("auto")) {
             System.out.println("No trained model found in this folder. Train one first:\n"
                 + "  digits 0-9:            java -cp out minidl.MnistDemo mnist 8 cnn 60000 aug      (makes mnist-cnn-aug.bin)\n"
                 + "  everything at once:    ./train-all.sh                                           (digits, letters, and digits+letters)");
             return;
         }
-        defaultKey = slots.keySet().iterator().next();
+        defaultKey = slots.isEmpty() ? "" : slots.keySet().iterator().next();
         warning = buildWarning();
         if (!warning.isEmpty()) System.out.println("WARNING: " + warning);
         if (!new File(webDir, "index.html").exists() && HandwritingServer.class.getResource("/web/index.html") == null) System.out.println("warning: " + new File(webDir, "index.html").getAbsolutePath() + " not found (run from the project folder)");
@@ -99,6 +99,11 @@ public class HandwritingServer {
         http.createContext("/api/learn", ex -> guard(ex, HandwritingServer::learn));
         http.createContext("/api/save", ex -> guard(ex, HandwritingServer::save));
         http.createContext("/api/reset", ex -> guard(ex, HandwritingServer::reset));
+        http.createContext("/api/hand", ex -> guard(ex, HandwritingServer::hand));                     // camera picture in, hands and fingertips out
+        http.createContext("/api/hand/calibrate", ex -> guard(ex, HandwritingServer::handCalibrate)); // the 9 squares, palm over them
+        http.createContext("/api/hand/reset", ex -> guard(ex, HandwritingServer::handReset));
+        http.createContext("/api/hand/background", ex -> guard(ex, HandwritingServer::handBackground));
+        http.createContext("/api/hand/config", ex -> guard(ex, HandwritingServer::handConfig));
         http.setExecutor(Executors.newFixedThreadPool(4));
         http.start();
         return http;
@@ -115,6 +120,7 @@ public class HandwritingServer {
     }
 
     static String buildWarning() {
+        if (slots.isEmpty()) return "No trained recognition model found in this folder, so writing cannot be recognised yet (run ./train-all.sh). The camera page (finger tracking) works without one.";
         boolean cased = slots.containsKey("full") || slots.containsKey("case");
         if (slots.containsKey("all") || slots.containsKey("letters") || cased) {
             return cased ? "" : "No model with capital AND small letters yet (a c and a C look the same to the merged A-Z model). Run ./train-all.sh to train the A-Z a-z model, then restart.";
@@ -211,17 +217,19 @@ public class HandwritingServer {
     static Slot slot(Map<String, String> q) {
         String k = q.getOrDefault("model", defaultKey);
         Slot s = slots.get(k);
+        if (slots.isEmpty()) throw new IllegalArgumentException("no recognition model is loaded: train one with ./train-all.sh (the camera and finger tracking do not need one)");
         if (s == null) throw new IllegalArgumentException("model '" + k + "' is not loaded (loaded: " + slots.keySet() + ")");
         return s;
     }
 
     static void page(HttpExchange ex) throws IOException {
         String p = ex.getRequestURI().getPath();
-        if (!p.equals("/") && !p.equals("/index.html")) { send(ex, 404, "text/plain", "not found"); return; }
-        File f = new File(webDir, "index.html");
+        String name = p.equals("/") || p.equals("/index.html") ? "index.html" : p.equals("/camera") || p.equals("/camera.html") ? "camera.html" : null;
+        if (name == null) { send(ex, 404, "text/plain", "not found"); return; }
+        File f = new File(webDir, name);
         if (f.exists()) { send(ex, 200, "text/html; charset=utf-8", new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)); return; }
-        try (java.io.InputStream in = HandwritingServer.class.getResourceAsStream("/web/index.html")) { // the copy packed inside minidl.jar
-            if (in == null) { send(ex, 404, "text/plain", "web/index.html not found"); return; }
+        try (java.io.InputStream in = HandwritingServer.class.getResourceAsStream("/web/" + name)) { // the copy packed inside minidl.jar
+            if (in == null) { send(ex, 404, "text/plain", "web/" + name + " not found"); return; }
             send(ex, 200, "text/html; charset=utf-8", new String(in.readAllBytes(), StandardCharsets.UTF_8));
         }
     }
@@ -283,6 +291,116 @@ public class HandwritingServer {
             f.write(rec1);
         }
         send(ex, 200, "application/json", String.format("{\"loss\":%.4f,\"learned\":%d,\"digit\":%s}", loss, s.rec.learnedCount(), digitJson(s, p, s.rec.predict(p.pixels, true), false, null)));
+    }
+
+    // ------------------------------------------------------------------ finger tracking
+    static final HandTracker tracker = new HandTracker();
+    static final int MAX_PICTURE_BYTES = 3 << 20, MAX_PICTURE_PIXELS = 2_500_000;
+
+    /** A camera picture (JPEG or PNG) from the request body. Refuses huge pictures before decoding them. */
+    static java.awt.image.BufferedImage readPicture(HttpExchange ex) throws IOException {
+        byte[] raw = ex.getRequestBody().readNBytes(MAX_PICTURE_BYTES + 1);
+        if (raw.length > MAX_PICTURE_BYTES) throw new IllegalArgumentException("picture is larger than " + MAX_PICTURE_BYTES + " bytes");
+        try (javax.imageio.stream.ImageInputStream in = javax.imageio.ImageIO.createImageInputStream(new java.io.ByteArrayInputStream(raw))) {
+            java.util.Iterator<javax.imageio.ImageReader> it = javax.imageio.ImageIO.getImageReaders(in);
+            if (!it.hasNext()) throw new IllegalArgumentException("the body is not a JPEG or PNG picture");
+            javax.imageio.ImageReader rd = it.next();
+            try {
+                rd.setInput(in);
+                if ((long) rd.getWidth(0) * rd.getHeight(0) > MAX_PICTURE_PIXELS) throw new IllegalArgumentException("picture has more than " + MAX_PICTURE_PIXELS + " pixels: send a smaller one");
+                return rd.read(0);
+            } finally { rd.dispose(); }
+        }
+    }
+
+    static void hand(HttpExchange ex) throws Exception {
+        Map<String, String> q = query(ex);
+        if (!ex.getRequestMethod().equals("POST")) throw new IllegalArgumentException("use POST with a JPEG picture as the body");
+        java.awt.image.BufferedImage img = readPicture(ex);
+        double t = System.nanoTime() / 1e9;
+        try { if (q.containsKey("t")) t = Double.parseDouble(q.get("t")); } catch (NumberFormatException e) { throw new IllegalArgumentException("t must be a number (seconds)"); }
+        tracker.requireMotion = !"0".equals(q.get("wave"));   // wave=0: a still hand counts at once (also still skin-coloured objects!)
+        tracker.rejectFaces = !"0".equals(q.get("face"));     // face=0: do not reject blobs with eye-like holes
+        HandTracker.Result r = tracker.process(img, t, parseZone(q.get("zone")));
+        StringBuilder sb = new StringBuilder(String.format(java.util.Locale.ROOT, "{\"w\":%d,\"h\":%d,\"ms\":%.1f,\"calibrated\":%b,\"background\":%b,\"hands\":[", r.w, r.h, r.ms, r.calibrated, r.background));
+        for (int i = 0; i < r.hands.size(); i++) {
+            HandTracker.Hand h = r.hands.get(i);
+            if (i > 0) sb.append(',');
+            sb.append(String.format(java.util.Locale.ROOT, "{\"slot\":%d,\"fingers\":%d,\"gesture\":%s,\"cx\":%.1f,\"cy\":%.1f,\"palmR\":%.1f,\"area\":%d,\"pointer\":%s",
+                h.slot, h.fingers, str(h.gesture), h.cx, h.cy, h.palmR, h.area,
+                h.hasPointer ? String.format(java.util.Locale.ROOT, "{\"x\":%.1f,\"y\":%.1f,\"speed\":%.1f}", h.pointerX, h.pointerY, h.speed) : "null"));
+            sb.append(",\"tips\":").append(points(h.tips)).append(",\"hull\":").append(points(h.hull)).append(",\"valleys\":").append(points(h.valleys)).append(",\"contour\":").append(points(h.contour)).append('}');
+        }
+        sb.append("],\"rejected\":[");
+        for (int i = 0; i < r.rejected.size(); i++) {
+            HandTracker.Rejected x = r.rejected.get(i);
+            sb.append(i > 0 ? "," : "").append(String.format("{\"x0\":%d,\"y0\":%d,\"x1\":%d,\"y1\":%d,\"area\":%d,\"reason\":%s}", x.x0, x.y0, x.x1, x.y1, x.area, str(x.reason)));
+        }
+        sb.append(']');
+        if ("1".equals(q.get("mask"))) { // the skin picture, to see what the tracker sees
+            java.awt.image.BufferedImage m = new java.awt.image.BufferedImage(r.w, r.h, java.awt.image.BufferedImage.TYPE_BYTE_GRAY);
+            for (int i = 0; i < r.mask.length; i++) m.getRaster().setSample(i % r.w, i / r.w, 0, r.mask[i] != 0 ? 255 : 0);
+            java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(m, "png", png);
+            sb.append(",\"mask\":\"data:image/png;base64,").append(java.util.Base64.getEncoder().encodeToString(png.toByteArray())).append('"');
+        }
+        send(ex, 200, "application/json", sb.append('}').toString());
+    }
+
+    /** "x0,y0,x1,y1" as fractions 0..1, or null. */
+    static double[] parseZone(String z) {
+        if (z == null || z.isEmpty()) return null;
+        String[] a = z.split(",");
+        if (a.length != 4) throw new IllegalArgumentException("zone must be x0,y0,x1,y1 (fractions 0..1)");
+        double[] v = new double[4];
+        try { for (int i = 0; i < 4; i++) v[i] = Double.parseDouble(a[i]); } catch (NumberFormatException e) { throw new IllegalArgumentException("zone must be four numbers"); }
+        if (v[0] < 0 || v[1] < 0 || v[2] > 1 || v[3] > 1 || v[2] - v[0] < 0.05 || v[3] - v[1] < 0.05) throw new IllegalArgumentException("zone must lie inside the picture and be at least 5% wide and high");
+        return v;
+    }
+
+    static String points(int[][] p) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < p.length; i++) sb.append(i > 0 ? "," : "").append('[').append(p[i][0]).append(',').append(p[i][1]).append(']');
+        return sb.append(']').toString();
+    }
+
+    static void handCalibrate(HttpExchange ex) throws Exception {
+        int n = tracker.calibrate(readPicture(ex));
+        send(ex, 200, "application/json", "{\"calibrated\":true,\"sampled\":" + n + "}");
+    }
+
+    /**
+     * Learning the background (pictures WITHOUT hands; your face may be in them):
+     * step=begin starts, a JPEG body adds a picture, step=done finishes, step=clear forgets it.
+     */
+    static void handBackground(HttpExchange ex) throws Exception {
+        String step = query(ex).getOrDefault("step", "add");
+        switch (step) {
+            case "begin": tracker.beginBackground(); send(ex, 200, "application/json", "{\"background\":false,\"frames\":0}"); break;
+            case "clear": tracker.clearBackground(); send(ex, 200, "application/json", "{\"background\":false}"); break;
+            case "done":
+                try { tracker.finishBackground(); } catch (IllegalStateException e) { throw new IllegalArgumentException(e.getMessage()); } // too few pictures: the caller's mistake (400)
+                send(ex, 200, "application/json", "{\"background\":true}");
+                break;
+            case "add": send(ex, 200, "application/json", "{\"background\":false,\"frames\":" + tracker.addBackground(readPicture(ex)) + "}"); break;
+            default: throw new IllegalArgumentException("step must be begin, add, done or clear");
+        }
+    }
+
+    static void handReset(HttpExchange ex) throws IOException {
+        tracker.reset();
+        send(ex, 200, "application/json", "{\"calibrated\":false}");
+    }
+
+    /** The calibration squares for a picture of size w x h, so the page draws exactly what the tracker will sample. */
+    static void handConfig(HttpExchange ex) throws IOException {
+        Map<String, String> q = query(ex);
+        int w, h;
+        try { w = Integer.parseInt(q.getOrDefault("w", "320")); h = Integer.parseInt(q.getOrDefault("h", "240")); } catch (NumberFormatException e) { throw new IllegalArgumentException("w and h must be whole numbers"); }
+        if (w < 32 || h < 32 || w > 4096 || h > 4096) throw new IllegalArgumentException("bad picture size");
+        StringBuilder sq = new StringBuilder("[");
+        for (int[] a3 : HandTracker.calibrationSquares(w, h)) sq.append(sq.length() > 1 ? "," : "").append('[').append(a3[0]).append(',').append(a3[1]).append(',').append(a3[2]).append(']');
+        send(ex, 200, "application/json", "{\"calibrated\":" + tracker.calibrated() + ",\"background\":" + tracker.backgroundReady() + ",\"squares\":" + sq.append(']') + "}");
     }
 
     static void save(HttpExchange ex) throws Exception {

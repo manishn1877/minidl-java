@@ -74,6 +74,9 @@ public class Tests {
         javaOnly();
         cased();
         tying();
+        hands();
+        handServer();
+        roomAndFace();
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
@@ -2213,5 +2216,372 @@ public class Tests {
             right &= best == (t + 1) % n;
         }
         check("a language model with tied weights learns the rule 'next token = this one + 1' (all " + steps + " positions right)", right);
+    }
+
+    // ---------------------------------------------------------------- finger tracking (HandTracker, Kalman1D)
+    /** A drawn hand: a palm circle and n fingers (capsules) fanned around the direction `dir` (degrees, -90 = up). Returns the expected fingertip positions. */
+    static double[][] drawHand(java.awt.Graphics2D g, java.awt.Color skin, int cx, int cy, int palmR, int n, double dir, double fingerLen, double fingerW) {
+        g.setColor(skin);
+        g.fillOval(cx - palmR, cy - palmR, 2 * palmR, 2 * palmR);
+        g.setStroke(new java.awt.BasicStroke((float) fingerW, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
+        double[][] tips = new double[n][];
+        for (int i = 0; i < n; i++) {
+            double a = Math.toRadians(dir + (n == 1 ? 0 : (i - (n - 1) / 2.0) * 27));
+            double r0 = 0.6 * palmR, r1 = palmR + fingerLen;
+            g.draw(new java.awt.geom.Line2D.Double(cx + r0 * Math.cos(a), cy + r0 * Math.sin(a), cx + r1 * Math.cos(a), cy + r1 * Math.sin(a)));
+            tips[i] = new double[]{cx + (r1 + fingerW / 2) * Math.cos(a), cy + (r1 + fingerW / 2) * Math.sin(a)};
+        }
+        return tips;
+    }
+
+    static java.awt.image.BufferedImage scene(java.awt.Color bg, java.awt.Color skin, int[][] hands, long noiseSeed) { // hands: cx, cy, palmR, fingers, dir
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(320, 240, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(bg);
+        g.fillRect(0, 0, 320, 240);
+        for (int[] h : hands) drawHand(g, skin, h[0], h[1], h[2], h[3], h[4], 55, 17);
+        g.dispose();
+        Random r = new Random(noiseSeed); // camera noise
+        for (int y = 0; y < 240; y++) for (int x = 0; x < 320; x++) {
+            int c = img.getRGB(x, y), nr = (int) (r.nextGaussian() * 4);
+            int rr = Math.max(0, Math.min(255, (c >> 16 & 255) + nr)), gg = Math.max(0, Math.min(255, (c >> 8 & 255) + nr)), bb = Math.max(0, Math.min(255, (c & 255) + nr));
+            img.setRGB(x, y, rr << 16 | gg << 8 | bb);
+        }
+        try { // a camera stream is JPEG: compress like the page does (quality 0.7), so the tests see the same blur and colour bleed
+            java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageWriter wr = javax.imageio.ImageIO.getImageWritersByFormatName("jpeg").next();
+            javax.imageio.ImageWriteParam pm = wr.getDefaultWriteParam();
+            pm.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            pm.setCompressionQuality(0.7f);
+            wr.setOutput(javax.imageio.ImageIO.createImageOutputStream(o));
+            wr.write(null, new javax.imageio.IIOImage(img, null, null), pm);
+            wr.dispose();
+            return javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(o.toByteArray()));
+        } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    }
+
+    static java.awt.image.BufferedImage handAt(java.awt.Color[] tone, int cx, int cy, int R, int n, int len, int fw) {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(320, 240, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(tone[0]);
+        g.fillRect(0, 0, 320, 240);
+        g.setColor(tone[1]);
+        g.fillOval(cx - R, cy - R, 2 * R, 2 * R);
+        g.setStroke(new java.awt.BasicStroke(fw, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
+        for (int i = 0; i < n; i++) { double a = Math.toRadians(-90 + (n == 1 ? 0 : (i - (n - 1) / 2.0) * 27)); g.drawLine((int) (cx + .6 * R * Math.cos(a)), (int) (cy + .6 * R * Math.sin(a)), (int) (cx + (R + len) * Math.cos(a)), (int) (cy + (R + len) * Math.sin(a))); }
+        g.dispose();
+        try {
+            java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageWriter wr = javax.imageio.ImageIO.getImageWritersByFormatName("jpeg").next();
+            javax.imageio.ImageWriteParam pm = wr.getDefaultWriteParam();
+            pm.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            pm.setCompressionQuality(0.7f);
+            wr.setOutput(javax.imageio.ImageIO.createImageOutputStream(o));
+            wr.write(null, new javax.imageio.IIOImage(img, null, null), pm);
+            wr.dispose();
+            return javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(o.toByteArray()));
+        } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    }
+
+    /** A tracker for single still pictures: no "wave to start" (the pictures in these tests do not move). */
+    static HandTracker still() { HandTracker t = new HandTracker(); t.requireMotion = false; return t; }
+
+    static void hands() throws Exception {
+        java.awt.Color bg = new java.awt.Color(20, 60, 100), skin = new java.awt.Color(224, 172, 140);
+        // 1. finger counts 0..5, the general skin rule, no calibration
+        StringBuilder counts = new StringBuilder();
+        boolean allOk = true;
+        for (int n = 0; n <= 5; n++) {
+            HandTracker t = still();
+            HandTracker.Result res = t.process(scene(bg, skin, new int[][]{{160, 150, 42, n, -90}}, n), 0);
+            int got = res.hands.isEmpty() ? -1 : res.hands.get(0).fingers;
+            counts.append(got).append(' ');
+            allOk &= got == n;
+        }
+        check("hand: a fist and 1 to 5 fingers are counted right (got " + counts.toString().trim() + ")", allOk);
+
+        // 2. where the fingertips are
+        HandTracker t2 = still();
+        java.awt.image.BufferedImage three = scene(bg, skin, new int[][]{{160, 150, 42, 3, -90}}, 7);
+        java.awt.Graphics2D unused = null;
+        double[][] want = new double[3][];
+        java.awt.image.BufferedImage tmp = new java.awt.image.BufferedImage(10, 10, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        want = drawHand(tmp.createGraphics(), skin, 160, 150, 42, 3, -90, 55, 17);
+        HandTracker.Hand h3 = t2.process(three, 0).hands.get(0);
+        double worst = 0;
+        for (double[] w : want) { double best = 1e9; for (int[] tp : h3.tips) best = Math.min(best, Math.hypot(tp[0] - w[0], tp[1] - w[1])); worst = Math.max(worst, best); }
+        check("hand: the 3 fingertips are found within " + String.format("%.1f", worst) + " px of where they were drawn", h3.tips.length == 3 && worst < 9);
+        check("hand: the palm centre is found (" + String.format("%.0f,%.0f", h3.cx, h3.cy) + " for 160,150) and the palm radius is about 42 (" + String.format("%.0f", h3.palmR) + ")", Math.hypot(h3.cx - 160, h3.cy - 150) < 8 && Math.abs(h3.palmR - 42) < 8);
+
+        // 3. one finger pointing in another direction: the pointer is the fingertip
+        HandTracker t3 = still();
+        double[][] wr = drawHand(tmp.createGraphics(), skin, 150, 120, 40, 1, 20, 55, 17);
+        HandTracker.Hand hr = t3.process(scene(bg, skin, new int[][]{{150, 120, 40, 1, 20}}, 3), 0).hands.get(0);
+        check("hand: a finger pointing right-down gives the fingertip as pointer (off by " + String.format("%.1f", Math.hypot(hr.pointerX - wr[0][0], hr.pointerY - wr[0][1])) + " px), gesture " + hr.gesture,
+            hr.fingers == 1 && hr.gesture.equals("POINT") && Math.hypot(hr.pointerX - wr[0][0], hr.pointerY - wr[0][1]) < 8);
+
+        // 4. two hands keep their own slot (left of the picture = slot 0)
+        HandTracker t4 = still();
+        HandTracker.Result two = t4.process(scene(bg, skin, new int[][]{{80, 150, 36, 2, -90}, {240, 150, 36, 4, -90}}, 11), 0);
+        check("hand: two hands are found, left one has 2 fingers (slot 0), right one 4 (slot 1)", two.hands.size() == 2 && two.hands.get(0).slot == 0 && two.hands.get(0).fingers == 2 && two.hands.get(1).slot == 1 && two.hands.get(1).fingers == 4);
+
+        // 5. calibration: blue-green skin on a brown background is NOT skin for the general rule, but works after covering the squares
+        java.awt.Color odd = new java.awt.Color(110, 170, 200), brown = new java.awt.Color(170, 140, 60);
+        HandTracker t5 = still();
+        java.awt.image.BufferedImage oddScene = scene(brown, odd, new int[][]{{160, 125, 45, 3, -90}}, 5);
+        HandTracker.Result miss = t5.process(oddScene, 0);
+        int before = miss.hands.isEmpty() ? 0 : miss.hands.get(0).fingers;
+        int sampled = t5.calibrate(scene(brown, odd, new int[][]{{160, 110, 60, 0, -90}}, 6)); // the palm covers the 9 squares
+        HandTracker.Result after = t5.process(scene(brown, odd, new int[][]{{160, 125, 45, 3, -90}}, 8), 0);
+        check("hand: the general skin rule fails on an odd-coloured hand (" + before + " fingers; the brown background even looks like skin to it), calibration on the 9 squares (" + sampled + " pixels) finds 3 fingers",
+            before != 3 && after.calibrated && !after.hands.isEmpty() && after.hands.get(0).fingers == 3);
+        t5.reset();
+        check("hand: reset forgets the calibration", !t5.calibrated());
+        int[][] sq = HandTracker.calibrationSquares(320, 240);
+        check("hand: the 9 calibration squares are inside the picture and in the middle of it", sq.length == 9 && java.util.Arrays.stream(sq).allMatch(q -> q[0] >= 0 && q[1] >= 0 && q[0] + q[2] <= 320 && q[1] + q[2] <= 240 && q[0] > 100 && q[0] < 220));
+
+        // 6. speed and smoothing: the pointer moves, the filter follows, and speed is about the real speed
+        HandTracker t6 = still();
+        HandTracker.Hand last = null;
+        for (int f = 0; f < 12; f++) last = t6.process(scene(bg, skin, new int[][]{{100 + 8 * f, 150, 38, 1, -90}}, 20 + f), f / 15.0).hands.get(0);
+        double expected = 8 * 15; // pixels per second
+        check("hand: tracking a finger that moves 8 px per frame at 15 frames/s: filtered speed " + String.format("%.0f", last.speed) + " px/s (real " + (int) expected + ")", last.speed > 0.6 * expected && last.speed < 1.5 * expected);
+        check("hand: processing a 320x240 picture takes " + String.format("%.1f", last.speed >= 0 ? t6.process(scene(bg, skin, new int[][]{{160, 150, 42, 5, -90}}, 1), 1.0).ms : 0) + " ms (limit 150 ms)", t6.process(scene(bg, skin, new int[][]{{160, 150, 42, 5, -90}}, 1), 2.0).ms < 150);
+
+        // 6b. robustness over skin tones, hand sizes and finger counts, all JPEG-compressed (this is what a camera stream looks like)
+        java.awt.Color[][] tones = {{new java.awt.Color(20, 60, 100), new java.awt.Color(224, 172, 140)}, {new java.awt.Color(40, 40, 50), new java.awt.Color(190, 140, 110)}, {new java.awt.Color(170, 140, 60), new java.awt.Color(110, 170, 200)}, {new java.awt.Color(90, 110, 90), new java.awt.Color(205, 150, 120)}};
+        int right = 0, cases = 0, invented = 0;
+        for (int ti = 0; ti < tones.length; ti++) for (int R : new int[]{27, 35, 45}) {
+            for (int n = 0; n <= 5; n++) {
+                HandTracker tt = still();
+                if (ti >= 2) tt.calibrate(handAt(tones[ti], 160, 108, 54, 0, 0, 10)); // the odd tones need the 9 squares
+                HandTracker.Result rr = tt.process(handAt(tones[ti], 160, 150, R, n, (int) (1.25 * R), Math.max(8, (int) (0.38 * R))), 0);
+                cases++;
+                if (!rr.hands.isEmpty() && rr.hands.get(0).fingers == n) right++;
+            }
+            if (ti >= 2) { HandTracker tt = still(); tt.calibrate(handAt(tones[ti], 160, 108, 54, 0, 0, 10)); if (!tt.process(handAt(tones[ti], 160, 150, 1, 0, 0, 1), 0).hands.isEmpty()) invented++; }
+        }
+        check("hand: " + right + " of " + cases + " JPEG pictures (4 skin tones, 3 hand sizes, 0 to 5 fingers) counted right, " + invented + " hands invented in empty pictures", right == cases && invented == 0);
+
+        // 7. nothing but background: no hands, no crash; a big picture is scaled down
+        check("hand: a picture with no skin colour gives no hands", still().process(scene(bg, bg, new int[][]{}, 1), 0).hands.isEmpty());
+        java.awt.image.BufferedImage big = new java.awt.image.BufferedImage(1280, 720, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        HandTracker.Result rb = still().process(big, 0);
+        check("hand: a 1280x720 picture is scaled to 320x180 and a black picture gives no hands", rb.w == 320 && rb.h == 180 && rb.hands.isEmpty());
+
+        // 8. the geometry on its own
+        int[][] sqr = new int[0][];
+        byte[] m = new byte[20 * 20];
+        for (int y = 5; y < 15; y++) for (int x = 4; x < 16; x++) m[y * 20 + x] = 1; // a 12 x 10 rectangle
+        int[] lab = new int[400];
+        for (int i = 0; i < 400; i++) lab[i] = m[i];
+        int[][] outline = HandTracker.trace(lab, 1, 20, 20);
+        int[] hull = HandTracker.convexHull(outline);
+        check("geometry: the outline of a 12 x 10 rectangle has " + outline.length + " pixels (2*(12+10)-4 = 40) and its hull has 4 corners (" + hull.length + ")", outline.length == 40 && hull.length == 4);
+        byte[] u = new byte[30 * 30]; // a U shape: the inside of the U is a deep valley
+        int[] ulab = new int[900];
+        for (int y = 5; y < 25; y++) for (int x = 5; x < 25; x++) if (!(x >= 11 && x < 19 && y < 20)) u[y * 30 + x] = 1;
+        for (int i = 0; i < 900; i++) ulab[i] = u[i];
+        int[][] uo = HandTracker.trace(ulab, 1, 30, 30);
+        java.util.List<int[]> d = HandTracker.defects(uo, HandTracker.convexHull(uo));
+        int deepest = 0;
+        for (int[] x : d) deepest = Math.max(deepest, x[3] / 256);
+        check("geometry: a U shape has a convexity defect about 15 deep (found " + deepest + ")", deepest >= 13 && deepest <= 16);
+
+        // 9. the Kalman filter
+        Random rn = new Random(4);
+        Kalman1D k = new Kalman1D(4e4, 6);
+        double rawErr = 0, filtErr = 0;
+        for (int f = 0; f < 60; f++) {
+            double truth = 50 + 5 * f, noisy = truth + rn.nextGaussian() * 4, est = k.update(noisy, 1 / 15.0);
+            if (f > 15) { rawErr += Math.abs(noisy - truth); filtErr += Math.abs(est - truth); }
+        }
+        double predicted = k.predict(1 / 15.0), next = 50 + 5 * 60;
+        check("kalman: smoothing a noisy position gives a smaller error (" + String.format("%.1f -> %.1f", rawErr / 44, filtErr / 44) + " px) and a lost frame is guessed well (off by " + String.format("%.1f", Math.abs(predicted - next)) + " px)",
+            filtErr < rawErr && Math.abs(predicted - next) < 8);
+    }
+
+    static byte[] jpeg(java.awt.image.BufferedImage img) throws Exception {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "jpg", o);
+        return o.toByteArray();
+    }
+
+    static void handServer() throws Exception {
+        HandwritingServer.slots.clear();
+        HandwritingServer.tracker.reset();
+        com.sun.net.httpserver.HttpServer web = HandwritingServer.startHttp(0);
+        try {
+            String base = "http://127.0.0.1:" + web.getAddress().getPort();
+            java.net.http.HttpClient hc = java.net.http.HttpClient.newHttpClient();
+            java.util.function.BiFunction<String[], byte[], java.net.http.HttpResponse<String>> call = (a, body) -> { // {method, path, withHeader}
+                try {
+                    java.net.http.HttpRequest.Builder b = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + a[1]));
+                    if (a[2].equals("1")) b.header("X-MiniDL", "1");
+                    b.method(a[0], body == null ? java.net.http.HttpRequest.BodyPublishers.noBody() : java.net.http.HttpRequest.BodyPublishers.ofByteArray(body));
+                    return hc.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+                } catch (Exception e) { throw new RuntimeException(e); }
+            };
+            java.awt.Color[] tone = {new java.awt.Color(20, 60, 100), new java.awt.Color(224, 172, 140)};
+            byte[] pic = jpeg(handAt(tone, 160, 150, 42, 3, 55, 17));
+            java.net.http.HttpResponse<String> ok = call.apply(new String[]{"POST", "/api/hand?t=1.5&wave=0", "1"}, pic);
+            java.util.Map<?, ?> js = (java.util.Map<?, ?>) MiniJson.parse(ok.body());
+            java.util.Map<?, ?> hand0 = (java.util.Map<?, ?>) ((java.util.List<?>) js.get("hands")).get(0);
+            check("camera api: a JPEG with a 3-finger hand gives 1 hand, 3 fingers, THREE, a pointer, 3 tips and an outline",
+                ok.statusCode() == 200 && ((Number) hand0.get("fingers")).intValue() == 3 && hand0.get("gesture").equals("THREE") && hand0.get("pointer") != null
+                && ((java.util.List<?>) hand0.get("tips")).size() == 3 && ((java.util.List<?>) hand0.get("contour")).size() > 20 && ((Number) js.get("w")).intValue() == 320);
+            check("camera api: mask=1 adds the skin picture as a PNG data address", call.apply(new String[]{"POST", "/api/hand?mask=1&wave=0", "1"}, pic).body().contains("\"mask\":\"data:image/png;base64,"));
+            check("camera api: a POST without the X-MiniDL header is refused (403), like the other writing calls", call.apply(new String[]{"POST", "/api/hand", "0"}, pic).statusCode() == 403 && call.apply(new String[]{"POST", "/api/hand/calibrate", "0"}, pic).statusCode() == 403);
+            check("camera api: something that is not a picture gives a clear 400", call.apply(new String[]{"POST", "/api/hand", "1"}, "hello, not an image".getBytes()).statusCode() == 400);
+            java.awt.image.BufferedImage huge = new java.awt.image.BufferedImage(2000, 2000, java.awt.image.BufferedImage.TYPE_BYTE_GRAY);
+            java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(huge, "png", png);
+            java.net.http.HttpResponse<String> hugeResp = call.apply(new String[]{"POST", "/api/hand", "1"}, png.toByteArray());
+            check("camera api: a 2000 x 2000 picture (4 million pixels, a few KB as PNG) is refused before it is decoded", hugeResp.statusCode() == 400 && hugeResp.body().contains("pixels"));
+            check("camera api: a body over 3 MB is refused", call.apply(new String[]{"POST", "/api/hand", "1"}, new byte[(3 << 20) + 10]).statusCode() == 400);
+            check("camera api: a bad time value is a 400", call.apply(new String[]{"POST", "/api/hand?t=abc", "1"}, pic).statusCode() == 400);
+            java.util.Map<?, ?> cfg = (java.util.Map<?, ?>) MiniJson.parse(call.apply(new String[]{"GET", "/api/hand/config?w=320&h=240", "0"}, null).body());
+            check("camera api: config tells the page where the 9 calibration squares are", ((java.util.List<?>) cfg.get("squares")).size() == 9 && cfg.get("calibrated").equals(Boolean.FALSE));
+            call.apply(new String[]{"POST", "/api/hand/calibrate", "1"}, jpeg(handAt(tone, 160, 108, 54, 0, 0, 10)));
+            boolean calibrated = ((java.util.Map<?, ?>) MiniJson.parse(call.apply(new String[]{"GET", "/api/hand/config", "0"}, null).body())).get("calibrated").equals(Boolean.TRUE);
+            call.apply(new String[]{"POST", "/api/hand/reset", "1"}, null);
+            boolean forgotten = ((java.util.Map<?, ?>) MiniJson.parse(call.apply(new String[]{"GET", "/api/hand/config", "0"}, null).body())).get("calibrated").equals(Boolean.FALSE);
+            check("camera api: calibrate remembers the skin colour, reset forgets it", calibrated && forgotten);
+            check("camera api: a bad picture size in config is a 400", call.apply(new String[]{"GET", "/api/hand/config?w=5&h=5", "0"}, null).statusCode() == 400);
+            // background learning, zone and "wave to start" over HTTP
+            byte[] roomPic = jpeg(room(false, 0, 0, 0)), roomHand = jpeg(room(true, 262, 0, 0));
+            java.net.http.HttpResponse<String> stillHand = call.apply(new String[]{"POST", "/api/hand?wave=1", "1"}, roomHand);
+            check("camera api: a still hand in a room with a face and a shelf is not taken at once (wave to start): reasons are in the answer",
+                stillHand.statusCode() == 200 && stillHand.body().contains("\"rejected\":[{") && stillHand.body().contains("still") && stillHand.body().contains("\"background\":false"));
+            check("camera api: background steps need the X-MiniDL header and a known step", call.apply(new String[]{"POST", "/api/hand/background?step=begin", "0"}, null).statusCode() == 403 && call.apply(new String[]{"POST", "/api/hand/background?step=bogus", "1"}, null).statusCode() == 400);
+            call.apply(new String[]{"POST", "/api/hand/background?step=begin", "1"}, null);
+            call.apply(new String[]{"POST", "/api/hand/background", "1"}, roomPic);
+            check("camera api: finishing the background with only 1 picture is refused with a clear 400", call.apply(new String[]{"POST", "/api/hand/background?step=done", "1"}, null).statusCode() == 400);
+            for (int i = 0; i < 4; i++) call.apply(new String[]{"POST", "/api/hand/background", "1"}, roomPic);
+            check("camera api: the background is learned from 5 pictures", call.apply(new String[]{"POST", "/api/hand/background?step=done", "1"}, null).body().contains("\"background\":true"));
+            java.net.http.HttpResponse<String> bgHand = call.apply(new String[]{"POST", "/api/hand?wave=1", "1"}, roomHand);
+            java.util.Map<?, ?> bj = (java.util.Map<?, ?>) MiniJson.parse(bgHand.body());
+            check("camera api: with the background learned the hand is found at once (3 fingers), alone, and the answer says background:true",
+                bj.get("background").equals(Boolean.TRUE) && ((java.util.List<?>) bj.get("hands")).size() == 1 && ((Number) ((java.util.Map<?, ?>) ((java.util.List<?>) bj.get("hands")).get(0)).get("fingers")).intValue() == 3 && ((java.util.List<?>) bj.get("rejected")).isEmpty());
+            check("camera api: a bad zone is a 400 (too small, outside the picture, not numbers)",
+                call.apply(new String[]{"POST", "/api/hand?zone=0.1,0.1,0.12,0.12", "1"}, roomHand).statusCode() == 400 && call.apply(new String[]{"POST", "/api/hand?zone=0,0,1.5,1", "1"}, roomHand).statusCode() == 400 && call.apply(new String[]{"POST", "/api/hand?zone=a,b,c,d", "1"}, roomHand).statusCode() == 400);
+            java.util.Map<?, ?> zj = (java.util.Map<?, ?>) MiniJson.parse(call.apply(new String[]{"POST", "/api/hand?zone=0.0,0.0,0.5,0.5", "1"}, roomHand).body());
+            check("camera api: a zone that does not contain the hand finds no hand", ((java.util.List<?>) zj.get("hands")).isEmpty());
+            check("camera api: clearing the background works", call.apply(new String[]{"POST", "/api/hand/background?step=clear", "1"}, null).body().contains("\"background\":false"));
+            if (new File("web/camera.html").exists()) {
+                java.net.http.HttpResponse<String> page = call.apply(new String[]{"GET", "/camera", "0"}, null);
+                check("camera page: /camera serves the page with the Start camera button", page.statusCode() == 200 && page.body().contains("Start camera") && page.body().contains("api/hand"));
+            }
+        } finally { web.stop(0); HandwritingServer.tracker.reset(); HandwritingServer.tracker.clearBackground(); }
+    }
+
+    // ---------------------------------------------------------------- faces, walls and furniture must not count as hands
+    static java.awt.image.BufferedImage jpegRound(java.awt.image.BufferedImage img) {
+        try {
+            java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageWriter wr = javax.imageio.ImageIO.getImageWritersByFormatName("jpeg").next();
+            javax.imageio.ImageWriteParam pm = wr.getDefaultWriteParam();
+            pm.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            pm.setCompressionQuality(0.7f);
+            wr.setOutput(javax.imageio.ImageIO.createImageOutputStream(o));
+            wr.write(null, new javax.imageio.IIOImage(img, null, null), pm);
+            wr.dispose();
+            return javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(o.toByteArray()));
+        } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    }
+
+    /**
+     * A room like the one that fooled the first version: a wooden wall on the left (skin-coloured to a colour rule, touching 3 edges),
+     * a wooden shelf, a face with eyes and a mouth, and optionally a hand with 3 fingers. faceDx moves the face sideways.
+     */
+    static java.awt.image.BufferedImage room(boolean hand, int handX, int faceDx, int brightness) {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(320, 240, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(new java.awt.Color(60, 70, 90)); g.fillRect(0, 0, 320, 240);
+        g.setColor(new java.awt.Color(196, 148, 98)); g.fillRect(0, 0, 90, 240);                 // wooden wall
+        g.setColor(new java.awt.Color(205, 155, 105)); g.fillRect(105, 175, 60, 50);              // wooden shelf
+        int fx = 220 + faceDx;
+        g.setColor(new java.awt.Color(50, 35, 30)); g.fillOval(fx - 34, 22, 68, 40);               // hair
+        g.setColor(new java.awt.Color(224, 172, 140)); g.fillOval(fx - 32, 33, 64, 84);            // face
+        g.setColor(new java.awt.Color(50, 40, 40)); g.fillOval(fx - 20, 62, 11, 7); g.fillOval(fx + 9, 62, 11, 7); // eyes
+        g.setColor(new java.awt.Color(150, 70, 70)); g.fillOval(fx - 11, 94, 22, 7);               // mouth
+        if (hand) drawHand(g, new java.awt.Color(224, 172, 140), handX, 198, 28, 3, -90, 36, 12);
+        g.dispose();
+        if (brightness != 0) for (int y = 0; y < 240; y++) for (int x = 0; x < 320; x++) {
+            int c = img.getRGB(x, y);
+            img.setRGB(x, y, Math.max(0, Math.min(255, (c >> 16 & 255) + brightness)) << 16 | Math.max(0, Math.min(255, (c >> 8 & 255) + brightness)) << 8 | Math.max(0, Math.min(255, (c & 255) + brightness)));
+        }
+        return jpegRound(img);
+    }
+
+    static boolean hasReason(HandTracker.Result r, String part) { for (HandTracker.Rejected x : r.rejected) if (x.reason.contains(part)) return true; return false; }
+
+    static void roomAndFace() throws Exception {
+        // 1. a room with a face, a wall and a shelf but NO hand: nothing is a hand, and every blob says why
+        HandTracker t1 = new HandTracker();
+        HandTracker.Result empty = t1.process(room(false, 0, 0, 0), 0);
+        check("room: face + wooden wall + shelf and no hand gives 0 hands (rejected: " + empty.rejected.size() + ")", empty.hands.isEmpty() && empty.rejected.size() >= 2);
+        check("room: the wall is rejected for touching 3 edges and the face for its eye and mouth holes", hasReason(empty, "touches") && hasReason(empty, "face-like"));
+
+        // 2. the same room with a hand that waves: only the hand is found, the shelf is "still", the face and wall stay rejected
+        HandTracker t2 = new HandTracker();
+        t2.process(room(true, 250, 0, 0), 0.0);
+        HandTracker.Result waved = t2.process(room(true, 262, 0, 0), 0.07);
+        check("room: a waving hand is the ONLY hand found (3 fingers); wall, face and shelf are rejected: " + waved.hands.size() + " hand(s), " + waved.rejected.size() + " rejected",
+            waved.hands.size() == 1 && waved.hands.get(0).fingers == 3 && hasReason(waved, "still") && hasReason(waved, "face-like") && hasReason(waved, "touches"));
+        HandTracker.Result rested = t2.process(room(true, 262, 0, 0), 0.14);
+        for (int k = 0; k < 3; k++) rested = t2.process(room(true, 262, 0, 0), 0.2 + 0.07 * k);
+        check("room: once found, the hand is kept while it rests (still tracked after 4 pictures without moving)", rested.hands.size() == 1 && rested.hands.get(0).fingers == 3);
+
+        // 3. a hand that does not move at the start is not taken (it cannot be told from the shelf): "wave to start"
+        HandTracker t3 = new HandTracker();
+        t3.process(room(true, 262, 0, 0), 0.0);
+        HandTracker.Result notYet = t3.process(room(true, 262, 0, 0), 0.07);
+        check("room: a hand that has not moved yet is not taken (wave to start), reason shown", notYet.hands.isEmpty() && hasReason(notYet, "still"));
+
+        // 4. learn the background WITHOUT the hand, then only the hand is new: it is found at once, even held still, face and all
+        HandTracker t4 = new HandTracker();
+        t4.beginBackground();
+        for (int i = 0; i < 6; i++) t4.addBackground(room(false, 0, 0, 0));
+        t4.finishBackground();
+        HandTracker.Result withBg = t4.process(room(true, 262, 0, 0), 0.0);
+        check("background: learned from 6 pictures without the hand, the hand is found at once with 3 fingers and nothing else (" + withBg.hands.size() + " hand, " + withBg.rejected.size() + " rejected)",
+            withBg.background && withBg.hands.size() == 1 && withBg.hands.get(0).fingers == 3 && withBg.rejected.isEmpty());
+        HandTracker.Result quiet = t4.process(room(false, 0, 0, 0), 0.1);
+        check("background: without the hand nothing is found", quiet.hands.isEmpty());
+        HandTracker.Result lighter = t4.process(room(false, 0, 0, 12), 0.2);
+        check("background: a small change of the room light (+12) does not invent a hand", lighter.hands.isEmpty());
+        HandTracker.Result headMoves = t4.process(room(false, 0, 7, 0), 0.3);
+        check("background: the face moving 7 px sideways does not become a hand (" + headMoves.hands.size() + " hands)", headMoves.hands.isEmpty());
+        boolean tooFew = false;
+        try { HandTracker t5 = new HandTracker(); t5.beginBackground(); t5.addBackground(room(false, 0, 0, 0)); t5.finishBackground(); } catch (IllegalStateException e) { tooFew = true; }
+        check("background: finishing with fewer than 3 pictures gives a clear error", tooFew);
+        t4.clearBackground();
+        check("background: forgotten again", !t4.backgroundReady());
+
+        // 5. the hand zone: only skin inside the rectangle counts
+        HandTracker t6 = still();
+        t6.rejectFaces = false;
+        HandTracker.Result inZone = t6.process(room(true, 262, 0, 0), 0, new double[]{0.65, 0.45, 1.0, 1.0});   // lower right: the hand
+        HandTracker t7 = still();
+        HandTracker.Result faceZone = t7.process(room(true, 262, 0, 0), 0, new double[]{0.55, 0.0, 0.85, 0.5});  // upper right: only the face is inside
+        check("zone: a rectangle around the hand finds the hand (" + inZone.hands.size() + " hand, " + (inZone.hands.isEmpty() ? 0 : inZone.hands.get(0).fingers) + " fingers); a rectangle around only the face finds no hand (the face is rejected)",
+            inZone.hands.size() == 1 && inZone.hands.get(0).fingers == 3 && faceZone.hands.isEmpty() && hasReason(faceZone, "face-like"));
+
+        // 6. holes: the face test on its own
+        int[] lab = new int[40 * 40];
+        for (int y = 2; y < 38; y++) for (int x = 2; x < 38; x++) lab[y * 40 + x] = 1;
+        int solid = HandTracker.countHoles(lab, 1, 2, 2, 37, 37, 40);
+        for (int y = 12; y < 18; y++) for (int x = 10; x < 16; x++) lab[y * 40 + x] = 0;   // one hole
+        int one = HandTracker.countHoles(lab, 1, 2, 2, 37, 37, 40);
+        for (int y = 12; y < 18; y++) for (int x = 24; x < 30; x++) lab[y * 40 + x] = 0;   // a second hole
+        int two = HandTracker.countHoles(lab, 1, 2, 2, 37, 37, 40);
+        for (int y = 2; y < 10; y++) lab[y * 40 + 20] = 0; lab[2 * 40 + 20] = 0;           // a notch open to the outside is NOT a hole
+        for (int y = 2; y < 38; y++) { lab[y * 40 + 2] = 0; }
+        int open = HandTracker.countHoles(lab, 1, 3, 2, 37, 37, 40);
+        check("holes: a solid blob has 0, with 1 hole 1, with 2 holes 2; gaps open to the outside (between fingers) do not count (" + solid + "," + one + "," + two + "," + open + ")", solid == 0 && one == 1 && two == 2 && open == 2);
     }
 }

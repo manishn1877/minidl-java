@@ -1604,7 +1604,7 @@ Done items are ticked. Phases 1 to 3 are complete; Phases 4 to 6 are partly done
 
 **Phase 5: polish for recruiters**
 - [x] CI file (Java 17 and 21: tests, jars, version check). It runs when you push; check the Actions tab
-- [x] Plots of training vs validation loss (`docs/mnist-training.svg`, drawn by the Java class `Plot` from the real logs in `docs/logs`: `java -jar dist/minidl-1.4.0.jar plot`)
+- [x] Plots of training vs validation loss (`docs/mnist-training.svg`, drawn by the Java class `Plot` from the real logs in `docs/logs`: `java -jar dist/minidl-1.5.1.jar plot`)
 - [x] GitHub Pages site (`SiteBuilder`, section 21)
 - [ ] Record a 2-minute demo of MNIST training in a 256 MB limit, and of the text generator (needs a screen recording: not possible to make here)
 
@@ -1612,6 +1612,15 @@ Done items are ticked. Phases 1 to 3 are complete; Phases 4 to 6 are partly done
 - [x] **Model server** (`ModelServer`, `ModelPool`): worker pool per model, dynamic batching, bounded queue (503 when full), scaling, REST API and Prometheus `/metrics`. See section 19 and `docs/DJL-ANALYSIS.md`
 - [x] **PyTorch interop, Java only**: `SafeTensors` reads/writes the safetensors format and maps Dense, Conv2D and BatchNorm2D to PyTorch names and layouts (section 20). No Python anywhere in the project
 - [ ] Check it with a file written by real PyTorch (none was available here)
+
+**Phase 7: camera and finger tracking (new, 1.5.0; ideas from two example repositories)**
+- [x] **Hand and fingertip tracking in pure Java** (`HandTracker`, `Kalman1D`): skin colour (general rule or your own calibration on 9 squares), clean-up, blobs, palm circle, contour, convex hull, convexity defects, fingertips, finger count 0 to 5, two hands, Kalman-smoothed pointer with speed
+- [x] **"Start camera" page** (`web/camera.html`, `java -jar minidl.jar camera`): live camera, outlines and fingertips drawn on top, mirror, calibrate, skin-mask view, FPS/pointer/speed display, draw in the air with one finger, trail
+- [x] **Write in the air and recognise it** with the MiniDL models (digits, letters, A-Z a-z)
+- [x] **Keep faces and the room out** (1.5.1, after real-camera testing showed that colour alone also finds your face, walls and wooden furniture): Learn background, wave to start, face/wall/sliver rejection with the reason shown, hand zone, narrow-at-the-tip fingertip rule
+- [ ] **Test with a real webcam and real hands.** Everything so far was tested with drawn hands (JPEG-compressed, 4 skin tones, 3 sizes, 72 of 72 right) and a simulated browser; no real camera was available when this was built
+- [ ] Know WHICH finger is which, thumbs-up, OK sign, rock sign (the example web app gets these from a trained landmark model; this tracker only counts fingers)
+- [ ] Hand-held pen-up/pen-down by pinching; more than two hands; keep the face out of the way automatically
 
 ---
 
@@ -1751,10 +1760,10 @@ Built by Manish Gowda N.
 ## 18. Use it as a library, jar and Maven
 
 ```
-./build-jar.sh                       # dist/minidl-1.4.0.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
-java -jar dist/minidl-1.4.0.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
+./build-jar.sh                       # dist/minidl-1.5.1.jar (+ -sources.jar, -javadoc.jar), JDK 17+ only
+java -jar dist/minidl-1.5.1.jar help # commands: demo, tests, mnist, emnist, cifar, text, precision, bench, web, version
 ```
-In your own project, put `minidl-1.4.0.jar` on the classpath (`javac -cp minidl-1.4.0.jar MyApp.java`) and `import minidl.*;`.
+In your own project, put `minidl-1.5.1.jar` on the classpath (`javac -cp minidl-1.5.1.jar MyApp.java`) and `import minidl.*;`.
 With Maven: `mvn verify` compiles, runs the test suite and builds the jars (`pom.xml`, no dependencies); `mvn install` puts it in your local repository, then:
 ```xml
 <dependency><groupId>io.github.manishn1877</groupId><artifactId>minidl</artifactId><version>1.2.0</version></dependency>
@@ -1771,7 +1780,7 @@ Draw in the browser and the model reads it live. Pure Java on the server (the JD
 java -Xmx512m -cp out minidl.EmnistDemo emnist 8 124800 aug     # train the letters model
 ./run-web.sh letters         # letters A-Z, uses emnist-letters-cnn.bin
 ```
-Then open http://localhost:8080. `./run-web.sh` loads every trained model it finds and the page has buttons to switch between **digits+letters**, **letters** and **digits**. If the digits+letters or letters model is missing, a banner says so (a digits-only model can only answer with digits, so it reads an `H` as `4`). Check the labels with your own eyes once: `java -jar dist/minidl-1.4.0.jar check-data emnist mnist`.
+Then open http://localhost:8080. `./run-web.sh` loads every trained model it finds and the page has buttons to switch between **digits+letters**, **letters** and **digits**. If the digits+letters or letters model is missing, a banner says so (a digits-only model can only answer with digits, so it reads an `H` as `4`). Check the labels with your own eyes once: `java -jar dist/minidl-1.5.1.jar check-data emnist mnist`.
 
 What it does:
 - **Three ways to write.** *One character (auto-clear)*: write a character, it is recognised, shown, added to a "typed so far" line, and the canvas clears by itself. *Line (locks each character)*: after a short pause (slider, default 0.6 s, or Enter) the character you just wrote is recognised ONCE and LOCKED: its red box, label and picture are frozen and later strokes can never merge with it or move it, even if you write on top of it. The line reads left to right; clear starts again. *Scan*: the old whole-drawing mode for photos and scans. The next bullet describes how scan finds characters.
@@ -1789,15 +1798,15 @@ Limits: one user at a time is the intended use (corrections change the one share
 
 **Digits AND letters in one model (36 classes: 0-9, A-Z).** `./train-all.sh` also trains `alnum-cnn.bin` (`AlnumDemo`), and `./run-web.sh all` opens the page with it, so one drawing like `K7B2` is read in one go. `Alnum` puts MNIST digits and EMNIST letters into one shuffled data set, re-making every digit in the EMNIST style so the model sees one kind of picture. Pairs that look the same (0/O, 1/I, 2/Z, 5/S, 8/B) can only be guessed from the shape and the writer's habit, so expect a few more mix-ups than with the two separate models. If you know it is a number, use the digits page.
 
-Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. the full suite is 283 tests.
+Files: `DigitPreprocess.java`, `DigitRecognizer.java`, `HandwritingServer.java`, `EmnistLoader.java`, `EmnistDemo.java`, `Alnum.java`, `AlnumDemo.java`, `train-all.sh`, `web/index.html`, `run-web.sh`, `get-emnist.sh`. the full suite is 331 tests.
 
 ## 19. Model server (Phase 6)
 
 Serve any saved MiniDL model over HTTP, with the ideas of the Java part of DJL Serving (analysis: `docs/DJL-ANALYSIS.md`). Pure Java, no libraries.
 
 ```
-java -jar dist/minidl-1.4.0.jar serve                       # serves every *.bin in this folder
-java -jar dist/minidl-1.4.0.jar serve --port 8080 --model digits=mnist-cnn-aug.bin,batch=32,delay=5,workers=1,max_workers=4,queue=500
+java -jar dist/minidl-1.5.1.jar serve                       # serves every *.bin in this folder
+java -jar dist/minidl-1.5.1.jar serve --port 8080 --model digits=mnist-cnn-aug.bin,batch=32,delay=5,workers=1,max_workers=4,queue=500
 curl localhost:8080/ping
 curl -X POST localhost:8080/predictions/digits -d '{"inputs": [[0.0, 0.1, ...784 numbers...]]}'
 ```
@@ -1842,8 +1851,8 @@ follow the PyTorch documentation. Try one file from your PyTorch model and tell 
 
 The handwriting page is `web/index.html`; the Java server serves it. GitHub Pages can only host files, not run Java, so on Pages the page
 **draws and the Java program on your own computer recognises**:
-1. Turn on Pages: repository Settings, Pages, branch `main`, folder `/docs`. Build the site files with `java -jar dist/minidl-1.4.0.jar site` and commit `docs/`.
-2. On your computer run `./run-web.sh` (or `java -jar dist/minidl-1.4.0.jar web`).
+1. Turn on Pages: repository Settings, Pages, branch `main`, folder `/docs`. Build the site files with `java -jar dist/minidl-1.5.1.jar site` and commit `docs/`.
+2. On your computer run `./run-web.sh` (or `java -jar dist/minidl-1.5.1.jar web`).
 3. Open the Pages address. The page finds the server at `http://localhost:8080` (or the address you type and press connect).
 
 Problems fixed in 1.3.0 (found by reading the page against how Pages works; if you saw others, tell me what you saw):
@@ -1858,10 +1867,56 @@ Not tested in a real browser (none available here): the headers and paths are te
 
 **Models** (the page lists every model it finds; the broadest opens first): `emnist-full-cnn.bin` digits + A-Z + a-z (62 classes), `emnist-case-cnn.bin` A-Z + a-z (52), `alnum-cnn.bin` digits + merged letters (36), `emnist-letters-cnn.bin` merged letters (26), `mnist-cnn-aug.bin` digits (10).
 Train the new ones with `./get-emnist.sh` (also downloads the byclass files; that download link was not checked) and `./train-all.sh`, or one at a time:
-`java -Xmx2g -cp out minidl.EmnistDemo emnist 8 200000 aug case` (or `full`). Check the labels first: `java -jar dist/minidl-1.4.0.jar check-data emnist --byclass`.
+`java -Xmx2g -cp out minidl.EmnistDemo emnist 8 200000 aug case` (or `full`). Check the labels first: `java -jar dist/minidl-1.5.1.jar check-data emnist --byclass`.
 
 **Why capital vs small is hard.** EMNIST scales every picture to the same size, so a `c` and a `C` look identical to the model. The page therefore gives the server the height of the tallest other character on the line (`ref`), and `LetterCase` calls a look-alike letter *small* when it is under 68% of that height, otherwise *capital*. Letters with different shapes (b B, d D, e E ...) are left to the model. A letter with nothing to compare to is marked `?`. The **case** buttons (auto / ABC / abc) override it. Limit: a line made only of small letters has no tall letter to compare to, so use the abc button.
 
 **Locking.** The character being written lives on its own layer; the red boxes of finished characters are drawn from stored coordinates and are never recomputed. The page asks the server about one character at a time (cropped to its own ink), so what you write next can not change an earlier answer. The position of a new stroke is NOT used to decide that a character is finished (the strokes of an H or an M can be far apart): only the pause or Enter does. If two characters merge, lower the pause slider; if one letter splits in two (E, H), raise it.
 
 Tested: the case rule, byclass loader, alphabets, server parameters and safety rules in Java (17 tests); the page's behaviour (3218 written close together, a new character drawn on top of locked ones, clear, auto-clear and history, case buttons) in a simulated browser with a real canvas against the real server. Not tested in a real browser or on a phone.
+
+## 23. Finger tracking with the camera (Phase 7)
+
+```
+java -jar dist/minidl-1.5.1.jar camera        # starts the server and opens http://localhost:8080/camera
+```
+(or `./run-web.sh`, then open `http://localhost:8080/camera`, or press **Start camera (finger tracking)** on the handwriting page.)
+Press **Start camera**, allow the camera. The JDK has no webcam API, so the **browser** reads the camera and sends small JPEG pictures (320 wide) to the Java
+program; **all the finding is Java** (`HandTracker`, about 24 ms per picture at worst, 5 ms typical). Nothing leaves your computer.
+
+What you see: the hand outline (cyan), the convex hull (yellow), the valleys between fingers (blue), fingertips (red), the palm circle (magenta), the pointer
+(green cross, smoothed by a Kalman filter), the gesture name and finger count, FPS, server time, pointer position and speed. Buttons: **Mirror**, **Calibrate (Z)**,
+**Forget calibration**, **Show skin mask**, **Draw**, **Clear drawing**, colour, pen size, trail, **Recognise drawing**.
+
+How it works, step by step (the same pipeline as the OpenCV finger-tracking tutorial, written from scratch in Java):
+1. **Calibrate (optional).** Cover the 9 green squares with your palm and press Calibrate (Z): a hue/saturation histogram of YOUR skin in YOUR light is built. Without it a general skin-colour rule is used.
+2. **Skin mask:** every pixel is scored by the histogram (back-projection), smoothed, thresholded; then eroded and dilated once (the tutorial does it twice at twice the resolution).
+3. **Hands:** connected blobs, the two biggest that are large enough.
+4. **Palm:** distance transform; the centre of the biggest inscribed circle.
+5. **Outline, hull, defects:** boundary tracing, Andrew's convex hull, convexity defects (the valleys).
+6. **Fingertips:** hull corners far beyond the palm circle and not on the picture border; close ones merged. The count is the number of fingers shown; the farthest tip is the pointer.
+7. **Tracking:** hands keep their slot between pictures; a Kalman filter smooths the pointer, gives its speed, and keeps guessing for a few pictures if it is lost.
+
+**Gestures:** 0 fingers FIST, 1 POINT, 2 PEACE, 3 THREE, 4 FOUR, 5 OPEN PALM. **Writing in the air:** press Draw, point with ONE finger to draw, two fingers to move without drawing, a fist lifts the pen,
+an open palm held for 1.5 s clears. When you stop, the drawing is recognised by the model you picked (one character or a line); "recognise by itself" also clears it afterwards.
+
+API (same server, same safety rules: POST needs the `X-MiniDL` header): `POST /api/hand` (JPEG body; `?t=seconds`, `?mask=1`, `?wave=0|1`, `?face=0|1`, `?zone=x0,y0,x1,y1` as fractions; the answer also lists `rejected` blobs with reasons) and `POST /api/hand/background?step=begin|add|done|clear` returns hands with fingers, gesture, palm, pointer, tips, hull, valleys, outline;
+`POST /api/hand/calibrate`, `POST /api/hand/reset`, `GET /api/hand/config?w=&h=` (where the calibration squares are). Pictures over 3 MB or 2.5 million pixels are refused before decoding.
+
+**Keeping your face and the room out (1.5.1).** The first version only looked at colour, so a real webcam showed that your face, a wooden wall or furniture counted as hands. Now, in this order of strength:
+1. **Learn background (B).** Take your hands out of the picture (your face and the room may stay) and press it: 15 pictures become a reference. From then on only what is NEW compared with it can be a hand, so a resting face, wall and shelf are background. The reference follows slow light changes. Press it again if you move the camera or the room.
+2. **Wave to start** (on by default, only used when no background is learned): a skin-coloured blob must move before it becomes a NEW hand, so a still face, wall or shelf never does. A hand coming into the picture counts as moving; once found, a hand may rest.
+3. **Not a hand, whatever its colour:** a blob with 2 or more eye/mouth-like holes is a face; a blob over 30% of the picture or touching 3 edges is a wall; a sliver without a palm is an edge (for example the new edge of a head that moved); with a learned background, a new blob whose centre is at the old face is the head moving.
+4. **Hand zone:** press the button and drag a rectangle on the picture: only skin inside it counts. Fingertips must also be narrow near the tip, so a forehead or forearm does not give false fingers.
+5. **You can see it.** Everything ignored is drawn with a grey dashed box and its reason ("ignored: face-like: 2 holes inside (eyes, mouth)"), and listed next to the picture. Untick **ignore faces** or **wave to start** to turn a rule off.
+
+Not perfect: the face rule is a shape test (it needs the eyes to show as holes in the skin picture, which works in decent light), a hand held right at the old face position is also ignored while the background is learned, and a moving camera or a big change of light breaks the learned background (press B again).
+
+**Limits, honestly:** it is colour based. Your face and arm are skin colour too (keep them out of the picture, wear long sleeves, plain background), strong coloured light or a skin-coloured wall confuses it, and a long forearm
+makes the palm circle less steady. It counts fingers; it does not know which finger is which, so thumbs-up, rock and OK signs are not recognised (that needs a trained landmark model).
+The camera needs a secure page: `http://localhost` works, so does https. On the GitHub Pages site the camera page works the same way if the Java server runs on your computer (open the Pages address, the page finds `http://localhost:8080`).
+**Tested:** drawn hands, JPEG-compressed (4 skin tones, 3 sizes, 0 to 5 fingers: 72 of 72 right, no hands invented in empty pictures); a drawn room with a wooden wall, a shelf, a face with eyes and mouth and a hand: only the hand is found, with and without a learned background, with the face moving, with a zone, the geometry and the Kalman filter on their own, the HTTP endpoints and their limits (27 tests),
+and the whole page in a simulated browser against the real server (gestures, pointer within 6 px, calibration, writing a 7 in the air and reading it as 7 at 94%; the room scene above through the page). **Not tested here: a real webcam with a real face and room.** The face and wall rules were designed from what you reported and tested on drawn faces; real faces vary, so tell me what it still gets wrong.
+
+Credits: the finger-tracking ideas follow `amarlearning/Finger-Detection-and-Tracking` (Python and OpenCV: palm calibration squares, histogram back-projection, contours, hull, convexity defects, farthest point as fingertip, trail)
+and `sparshsinghal1618/finger-track` (browser app: Start Camera button, mirror, HUD with FPS/position/speed, finger-count gestures, drawing in the air, two hands). No code was copied; this is a Java implementation of the same ideas.

@@ -5,6 +5,7 @@
 #   ./run-web.sh digits         only the digits model        ./run-web.sh letters   only letters
 #   ./run-web.sh all            only the digits+letters model (stops with a message if it is not trained yet)
 #   ./run-web.sh auto 9000      different port
+#   The camera page (finger tracking) is at http://localhost:8080/camera  (or: java -jar minidl.jar camera)
 # If ./mnist and ./emnist exist, the page also shows the test accuracy and corrections are mixed with real pictures.
 set -e
 mkdir -p out

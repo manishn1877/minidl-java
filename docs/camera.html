@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniDL finger tracking</title>
+<style>
+:root{--paper:#eef1ee;--ink:#14213d;--red:#d7263d;--line:#c9d3d0;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,sans-serif;color:var(--ink);background:var(--paper) linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 28px;min-height:100vh}
+main{max-width:1060px;margin:0 auto;padding:20px 16px 40px;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+h1{grid-column:1/-1;margin:0;font:700 26px/1.2 var(--mono)}
+h1 small{display:block;font:400 13px var(--mono);opacity:.7;margin-top:4px}
+h1 a{color:var(--red)}
+.card{background:#fff;border:2px solid var(--ink);padding:12px;box-shadow:5px 5px 0 var(--ink)}
+.stage{position:relative;line-height:0;border:1px solid var(--line);background:#111;touch-action:none}
+canvas#view{width:100%;height:auto;display:block}
+#hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#ddd;font:14px/1.5 var(--mono);padding:20px;pointer-events:none}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button{font:600 13px var(--mono);border:2px solid var(--ink);background:#fff;color:var(--ink);padding:6px 10px;cursor:pointer}
+button:hover{background:var(--ink);color:#fff}
+button.on{background:var(--ink);color:#fff}
+button.go{background:var(--red);border-color:var(--red);color:#fff}
+label{font-size:13px}
+#warn{grid-column:1/-1;background:#fff3cd;border:2px solid var(--ink);padding:8px 12px;font:13px var(--mono)}
+#msg{font:12px var(--mono);color:var(--red);min-height:18px;margin-top:8px}
+.hud{font:12px var(--mono);display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.hud b{font-weight:600}
+.hand{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
+.gesture{font:700 22px var(--mono);color:var(--red)}
+#answer{font:700 54px/1 var(--mono);color:var(--red);min-height:56px;letter-spacing:.08em;word-break:break-all}
+.side{display:flex;flex-direction:column;gap:20px}
+h2{font:700 14px var(--mono);margin:0 0 6px}
+input[type=color]{width:34px;height:26px;padding:0;border:2px solid var(--ink);background:#fff}
+select{font:13px var(--mono);border:2px solid var(--ink);padding:4px;background:#fff}
+</style></head><body><main>
+<h1>MiniDL finger tracking<small>the camera is read in the browser; every picture is analysed by the Java program on your computer · <a href="index.html">handwriting page</a></small></h1>
+<div id="warn" hidden></div>
+
+<section class="card">
+  <div class="stage"><canvas id="view" width="640" height="480"></canvas><div id="hint">Press <b>&nbsp;Start camera&nbsp;</b> and allow the camera.<br>Show your hand against a plain background. Keep your face and arm out of the picture.</div></div>
+  <div id="guide" style="font:13px/1.5 var(--mono);background:#e8f4ff;border:2px solid var(--ink);padding:8px 10px;margin-bottom:10px">
+    <b>Step 1.</b> Press <b>Start camera</b>. <b>Step 2.</b> Take your hands out of the picture (your face and the room may stay) and press <b>Learn background</b>:
+    from then on only what is NEW in the picture, your hand, is tracked, not your face, the wall or the furniture.
+  </div>
+  <div class="row">
+    <button id="start" class="go">Start camera</button>
+    <button id="bgBtn" disabled title="hands OUT of the picture, then press (key B)">Learn background (B)</button>
+    <button id="bgOff" disabled>Forget background</button>
+    <button id="zoneBtn" title="drag a rectangle on the picture: only your hand inside it counts">Hand zone: off</button>
+  </div>
+  <div class="row">
+    <button id="cal" disabled title="cover the 9 green squares with your palm first (key Z)">Calibrate (Z)</button>
+    <button id="uncal" disabled>Forget calibration</button>
+    <button id="mirror" class="on" title="flip the picture like a mirror (key M)">Mirror: on</button>
+    <button id="maskBtn" title="show what the tracker sees (the skin picture)">Show skin mask</button>
+    <label title="a skin-coloured thing that never moves (face, wall, shelf) is not taken as a new hand; wave your hand to start"><input id="wave" type="checkbox" checked> wave to start</label>
+    <label title="blobs with eye/mouth-like holes are faces, not hands"><input id="face" type="checkbox" checked> ignore faces</label>
+  </div>
+  <div class="row">
+    <button id="drawBtn" title="point with ONE finger to draw, two fingers to move without drawing (key D)">Draw: off</button>
+    <button id="clearBtn" title="key C">Clear drawing</button>
+    <label>colour <input id="color" type="color" value="#d7263d"></label>
+    <label>pen <input id="pen" type="range" min="3" max="24" value="12"></label>
+    <label><input id="trail" type="checkbox" checked> trail</label>
+  </div>
+  <div class="row">
+    <button id="recBtn">Recognise drawing</button>
+    <label>model <select id="model"></select></label>
+    <label>read as <select id="readAs"><option value="single">one character</option><option value="multi">a line of characters</option></select></label>
+    <label><input id="auto" type="checkbox" checked> recognise by itself when I stop drawing</label>
+  </div>
+  <div id="msg"></div>
+</section>
+
+<section class="side">
+  <div class="card">
+    <h2>recognised from your drawing</h2>
+    <div id="answer">-</div><div id="meta" style="font:12px var(--mono);opacity:.75;min-height:18px"></div>
+  </div>
+  <div class="card">
+    <h2>live</h2>
+    <div class="hud"><span>fps</span><b id="fps">-</b><span>server</span><b id="srv">-</b><span>skin</span><b id="calst">general skin rule (not calibrated)</b><span>background</span><b id="bgst">not learned</b></div>
+    <div id="ignored" style="font:12px var(--mono);margin-top:8px;line-height:1.5"></div>
+    <div id="hands"></div>
+    <div style="font:12px var(--mono);opacity:.75;margin-top:8px;line-height:1.5">1 finger = pointer / draw · 2 fingers = move without drawing · fist = pen up · open palm held 1.5 s = clear.<br>It counts fingers (0 to 5); it does not know which finger is which.</div>
+  </div>
+  <img id="maskImg" alt="" style="display:none;width:100%;border:2px solid var(--ink);image-rendering:pixelated;background:#000">
+</section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const qs=new URLSearchParams(location.search);
+const onPages=location.hostname.endsWith('github.io')||location.protocol==='file:';
+let API=qs.get('server')||(()=>{try{return localStorage.getItem('minidlServer')}catch(e){return null}})()||(onPages?'http://localhost:8080':'');
+const base=()=>API?API.replace(/\/+$/,'')+'/':'';
+const api=(p,o={})=>fetch(base()+p,Object.assign({},o,{headers:Object.assign({'X-MiniDL':'1'},o.headers||{})}));
+const say=t=>{$('#msg').textContent=t};
+
+const view=$('#view'), vctx=view.getContext('2d');
+const FW=320;                                   // pictures sent to the server are 320 wide (the tracker works at that size)
+const grab=document.createElement('canvas'), gctx=grab.getContext('2d',{willReadFrequently:true});
+const ink=document.createElement('canvas'), ictx=ink.getContext('2d',{willReadFrequently:true});   // the air drawing, same size as the view
+const video=document.createElement('video'); video.playsInline=true; video.muted=true;
+let stream=null, running=false, mirror=true, drawOn=false, showMask=false, calibrated=false, bgLearned=false, learning=false, zone=null, zoneMode=false, zoneDrag=null, squares=[], busy=false;
+let frames=[], last=null, maskUrl='', trails=[[],[]], pen=[null,null], palmSince=0, lastInkTime=0, recTimer=0, models=[], cur='', fh=240;
+
+// where the pictures come from; a test can replace this to feed pictures without a camera
+let frameSource=(c,w,h)=>c.drawImage(video,0,0,w,h);
+
+let offlineShown=false;
+function offline(){
+  offlineShown=true;const w=$('#warn');w.hidden=false;
+  w.innerHTML='Cannot reach the MiniDL Java server at <b>'+(API||location.origin)+'</b>. The camera page only shows the camera: the finger tracking is done by the Java program on your computer. '
+   +'Start it with <code>java -jar minidl-1.5.1.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
+   +'<br>Server address: <input id="sa" size="24" value="'+(API||'http://localhost:8080')+'"> <button id="conn">connect</button>';
+  $('#conn').onclick=()=>{API=$('#sa').value.trim();try{localStorage.setItem('minidlServer',API)}catch(e){}$('#warn').hidden=true;loadModels();if(running)loop()};
+}
+
+async function start(){
+  if(running)return;
+  if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){say('The camera needs a secure page: open http://localhost:8080/camera (or an https address).');return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480},facingMode:'user'},audio:false});
+    video.srcObject=stream;await video.play();
+  }catch(e){
+    say(e&&e.name==='NotAllowedError'?'The camera was blocked. Allow it in the address bar and press Start camera again.':e&&e.name==='NotFoundError'?'No camera was found.':'Could not start the camera: '+(e&&e.message||e));
+    return}
+  beginLoop()
+}
+function beginLoop(){
+  running=true;$('#start').textContent='Stop camera';$('#start').classList.remove('go');$('#hint').style.display='none';$('#cal').disabled=false;$('#uncal').disabled=false;$('#bgBtn').disabled=false;$('#bgOff').disabled=false;say('');
+  setup();loop()}
+function stop(){
+  running=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+  $('#start').textContent='Start camera';$('#start').classList.add('go');$('#hint').style.display='flex';$('#cal').disabled=true;$('#uncal').disabled=true;$('#bgBtn').disabled=true;$('#bgOff').disabled=true;
+  vctx.clearRect(0,0,view.width,view.height);$('#hands').innerHTML='';$('#fps').textContent='-'}
+$('#start').onclick=()=>running?stop():start();
+
+function setup(){
+  const vw=video.videoWidth||640,vh=video.videoHeight||480;
+  fh=Math.max(32,Math.round(FW*vh/vw));grab.width=FW;grab.height=fh;
+  view.width=vw;view.height=vh;ink.width=vw;ink.height=vh;
+  api(`api/hand/config?w=${FW}&h=${fh}`).then(r=>r.json()).then(j=>{squares=j.squares||[];calibrated=!!j.calibrated;bgLearned=!!j.background;status()}).catch(offline)}
+function status(){$('#calst').textContent=calibrated?'calibrated to your skin and light':'general skin rule (not calibrated)';$('#bgst').textContent=bgLearned?'learned: only new things are tracked':'not learned (faces and walls may be mistaken for hands)';$('#guide').style.display=bgLearned?'none':'block'}
+
+// ---- the loop: grab a picture, send it, draw what comes back
+async function loop(){
+  while(running){
+    if(busy||learning){await new Promise(r=>setTimeout(r,20));continue}
+    busy=true;const t0=performance.now();
+    try{
+      gctx.save();if(mirror){gctx.translate(FW,0);gctx.scale(-1,1)}frameSource(gctx,FW,fh);gctx.restore();
+      const jpg=grab.toDataURL('image/jpeg',0.7).split(',')[1],bin=atob(jpg),bytes=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      const r=await api(`api/hand?t=${(performance.now()/1000).toFixed(3)}${showMask?'&mask=1':''}&wave=${$('#wave').checked?1:0}&face=${$('#face').checked?1:0}${zone?'&zone='+zone.map(v=>v.toFixed(3)).join(','):''}`,{method:'POST',body:bytes});
+      const j=await r.json();
+      if(j.error){say(j.error)}else{last=j;if(j.mask&&showMask){$('#maskImg').src=j.mask}draw();handle(j)}
+      if(offlineShown){$('#warn').hidden=true;offlineShown=false}
+    }catch(e){offline();busy=false;return}
+    busy=false;frames.push(performance.now());while(frames.length&&frames[0]<performance.now()-1000)frames.shift();
+    $('#fps').textContent=frames.length+' fps';if(last)$('#srv').textContent=last.ms.toFixed(1)+' ms';
+    const wait=Math.max(0,60-(performance.now()-t0));if(wait)await new Promise(r=>setTimeout(r,wait));
+  }}
+
+// ---- drawing the picture and the overlays
+const k=()=>view.width/FW;
+function draw(){
+  vctx.save();if(mirror){vctx.translate(view.width,0);vctx.scale(-1,1)}frameSource(vctx,view.width,view.height);vctx.restore();
+  vctx.drawImage(ink,0,0);
+  const s=k();
+  if(!calibrated){vctx.lineWidth=2;vctx.strokeStyle='#00e060';squares.forEach(q=>vctx.strokeRect(q[0]*s,q[1]*s,q[2]*s,q[2]*s))}
+  if(zone){vctx.save();vctx.fillStyle='rgba(0,0,0,.45)';const zx=zone[0]*view.width,zy=zone[1]*view.height,zw=(zone[2]-zone[0])*view.width,zh=(zone[3]-zone[1])*view.height;
+    vctx.beginPath();vctx.rect(0,0,view.width,view.height);vctx.rect(zx,zy,zw,zh);vctx.fill('evenodd');vctx.setLineDash([8,6]);vctx.lineWidth=2;vctx.strokeStyle='#00e060';vctx.strokeRect(zx,zy,zw,zh);vctx.restore()}
+  if(zoneDrag){vctx.save();vctx.setLineDash([4,4]);vctx.strokeStyle='#00e060';vctx.lineWidth=2;vctx.strokeRect(zoneDrag.x0,zoneDrag.y0,zoneDrag.x1-zoneDrag.x0,zoneDrag.y1-zoneDrag.y0);vctx.restore()}
+  if(!last)return;
+  last.rejected.forEach(r=>{vctx.save();vctx.setLineDash([6,5]);vctx.lineWidth=2;vctx.strokeStyle='#9aa';vctx.strokeRect(r.x0*s,r.y0*s,(r.x1-r.x0)*s,(r.y1-r.y0)*s);vctx.fillStyle='#cfd8d8';vctx.font='600 13px ui-monospace,monospace';vctx.fillText('ignored: '+r.reason.split(':')[0].split(' (')[0],r.x0*s+3,Math.max(14,r.y0*s-4));vctx.restore()});
+  last.hands.forEach(h=>{
+    const col=h.slot?'#ffb000':'#00d4ff';
+    vctx.lineWidth=1.5;vctx.strokeStyle=col;poly(h.contour,s,true);
+    vctx.strokeStyle='#ffe600';poly(h.hull,s,true);
+    vctx.fillStyle='#3b82ff';h.valleys.forEach(p=>dot(p[0]*s,p[1]*s,4));
+    vctx.fillStyle='#ff2d55';h.tips.forEach(p=>dot(p[0]*s,p[1]*s,6));
+    vctx.fillStyle='#ff00ff';dot(h.cx*s,h.cy*s,5);vctx.strokeStyle='#ff00ff';vctx.beginPath();vctx.arc(h.cx*s,h.cy*s,h.palmR*s,0,7);vctx.stroke();
+    if(h.pointer){const x=h.pointer.x*s,y=h.pointer.y*s;vctx.strokeStyle='#00ff7f';vctx.lineWidth=2;vctx.beginPath();vctx.moveTo(x-14,y);vctx.lineTo(x+14,y);vctx.moveTo(x,y-14);vctx.lineTo(x,y+14);vctx.stroke();vctx.fillStyle='#00ff7f';dot(x,y,5)}
+    vctx.fillStyle='#fff';vctx.font='700 18px ui-monospace,monospace';vctx.fillText(h.gesture+' ('+h.fingers+')',Math.max(4,h.cx*s-60),Math.max(18,(h.cy-h.palmR-8)*s))});
+  if($('#trail').checked)trails.forEach((tr,i)=>tr.forEach((p,j)=>{vctx.fillStyle=i?'#ffb000':'#ffe600';dot(p[0],p[1],Math.max(1.5,6-j*0.3))}));
+  hud()}
+function poly(p,s,close){if(!p.length)return;vctx.beginPath();vctx.moveTo(p[0][0]*s,p[0][1]*s);for(let i=1;i<p.length;i++)vctx.lineTo(p[i][0]*s,p[i][1]*s);if(close)vctx.closePath();vctx.stroke()}
+function dot(x,y,r){vctx.beginPath();vctx.arc(x,y,r,0,7);vctx.fill()}
+function hud(){
+  $('#ignored').innerHTML=last.rejected.length?'<b>ignored (not hands):</b><br>'+last.rejected.map(r=>'· '+r.reason).join('<br>'):'';
+  $('#hands').innerHTML=last.hands.length?'':'<div style="font:12px var(--mono);opacity:.7;margin-top:6px">no hand found</div>';
+  last.hands.forEach(h=>{const d=document.createElement('div');d.className='hand';
+    d.innerHTML=`<div class="gesture">${h.gesture}</div><div class="hud"><span>hand</span><b>${h.slot?'right of picture':'left of picture'}</b><span>fingers</span><b>${h.fingers} ${'●'.repeat(h.fingers)}${'○'.repeat(5-h.fingers)}</b>`
+      +`<span>pointer</span><b>${h.pointer?Math.round(h.pointer.x)+', '+Math.round(h.pointer.y):'-'}</b><span>speed</span><b>${h.pointer?Math.round(h.pointer.speed)+' px/s':'-'}</b><span>palm</span><b>${Math.round(h.cx)}, ${Math.round(h.cy)} r ${Math.round(h.palmR)}</b></div>`;
+    $('#hands').append(d)})}
+
+// ---- air drawing and the trail
+function handle(j){
+  const now=performance.now(),s=k();
+  const seen=[false,false];
+  j.hands.forEach(h=>{
+    seen[h.slot]=true;
+    const px=h.pointer&&h.pointer.x*s,py=h.pointer&&h.pointer.y*s;
+    if(h.pointer){const tr=trails[h.slot];tr.unshift([px,py]);if(tr.length>20)tr.pop()}
+    if(drawOn&&h.fingers===1&&h.pointer){stroke(h.slot,px,py);lastInkTime=now;clearTimeout(recTimer);}
+    else pen[h.slot]=null;
+    if(h.fingers===5&&drawOn){if(!palmSince)palmSince=now;if(now-palmSince>1500){clearInk();palmSince=0}}else if(h.fingers!==5)palmSince=0});
+  seen.forEach((v,i)=>{if(!v){pen[i]=null;trails[i]=[]}});
+  if(drawOn&&$('#auto').checked&&lastInkTime&&!j.hands.some(h=>h.fingers===1)&&!recTimer&&hasInk()){recTimer=setTimeout(()=>{recTimer=0;recognise(true)},1200)}}
+function stroke(slot,x,y){
+  ictx.strokeStyle=ictx.fillStyle=$('#color').value;ictx.lineWidth=+$('#pen').value;ictx.lineCap=ictx.lineJoin='round';
+  const p=pen[slot];ictx.beginPath();if(p){ictx.moveTo(p[0],p[1]);ictx.lineTo(x,y);ictx.stroke()}else{ictx.arc(x,y,ictx.lineWidth/2,0,7);ictx.fill()}
+  pen[slot]=[x,y]}
+function hasInk(){const d=ictx.getImageData(0,0,ink.width,ink.height).data;for(let i=3;i<d.length;i+=4)if(d[i]>40)return true;return false}
+function clearInk(){ictx.clearRect(0,0,ink.width,ink.height);pen=[null,null];lastInkTime=0;clearTimeout(recTimer);recTimer=0}
+
+// ---- hand the drawing to the MiniDL recognisers
+async function recognise(auto){
+  if(!hasInk()){say('Draw something first: press Draw, then point with ONE finger.');return}
+  const W=ink.width,H=ink.height,d=ictx.getImageData(0,0,W,H).data,bytes=new Uint8Array(W*H);
+  for(let i=0;i<bytes.length;i++)bytes[i]=d[i*4+3];
+  const mode=$('#readAs').value;
+  try{
+    const r=await api(`api/predict?model=${cur}&w=${W}&h=${H}&mode=${mode}&tta=1&case=auto`,{method:'POST',body:bytes}),j=await r.json();
+    if(j.error){say(j.error);return}
+    $('#answer').textContent=j.text||'-';
+    $('#meta').textContent=j.digits.length?j.digits.map(x=>`${x.ch} ${Math.round(x.conf*100)}%`).join('   '):'nothing recognised';
+    if(auto&&$('#auto').checked)setTimeout(clearInk,900)
+  }catch(e){offline()}}
+$('#recBtn').onclick=()=>recognise(false);
+async function loadModels(){
+  try{const j=await (await fetch(base()+'api/info')).json();models=j.models;if(!cur)cur=j.default;
+    $('#model').innerHTML='';models.forEach(m=>{const o=document.createElement('option');o.value=m.key;o.textContent=m.name;$('#model').append(o)});$('#model').value=cur;
+    if(j.warning){const w=$('#warn');w.hidden=false;w.textContent=j.warning}}catch(e){offline()}}
+$('#model').onchange=()=>{cur=$('#model').value};
+
+// ---- buttons and keys
+async function calibrate(){
+  if(!running)return;
+  try{const r=await api('api/hand/calibrate',{method:'POST',body:await currentPicture()});const j=await r.json();
+    if(j.error){say(j.error);return}calibrated=true;status();say('Calibrated from '+j.sampled+' pixels of your palm. If the outline looks wrong, press Forget calibration and try again with the palm flat over the squares.')}catch(e){offline()}}
+async function currentPicture(){gctx.save();if(mirror){gctx.translate(FW,0);gctx.scale(-1,1)}frameSource(gctx,FW,fh);gctx.restore();
+  const b=atob(grab.toDataURL('image/jpeg',0.8).split(',')[1]),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}
+$('#cal').onclick=calibrate;
+async function learnBackground(){
+  if(!running||learning)return;
+  learning=true;
+  try{
+    for(let n=3;n>=1;n--){say('Take your hands out of the picture (your face may stay). Learning the background in '+n+' ...');await new Promise(r=>setTimeout(r,1000))}
+    await api('api/hand/background?step=begin',{method:'POST'});
+    for(let i=0;i<15;i++){say('Learning the background ('+(i+1)+'/15): keep still, hands out of the picture');
+      const r=await api('api/hand/background',{method:'POST',body:await currentPicture()});const j=await r.json();if(j.error){say(j.error);learning=false;return}
+      await new Promise(r=>setTimeout(r,70))}
+    await api('api/hand/background?step=done',{method:'POST'});
+    bgLearned=true;status();say('Background learned. Now bring your hand in: only new things are tracked. Press Learn background again if you move the camera or the room changes.');
+  }catch(e){offline()}
+  learning=false}
+$('#bgBtn').onclick=learnBackground;
+$('#bgOff').onclick=async()=>{await api('api/hand/background?step=clear',{method:'POST'});bgLearned=false;status();say('Background forgotten.')};
+$('#zoneBtn').onclick=()=>{if(zone){zone=null;$('#zoneBtn').textContent='Hand zone: off';$('#zoneBtn').classList.remove('on');return}
+  zoneMode=!zoneMode;$('#zoneBtn').classList.toggle('on',zoneMode);$('#zoneBtn').textContent=zoneMode?'Hand zone: drag on the picture':'Hand zone: off'};
+const vpos=e=>{const r=view.getBoundingClientRect();return[(e.clientX-r.left)*view.width/r.width,(e.clientY-r.top)*view.height/r.height]};
+view.addEventListener('pointerdown',e=>{if(!zoneMode)return;const [x,y]=vpos(e);zoneDrag={x0:x,y0:y,x1:x,y1:y};view.setPointerCapture&&view.setPointerCapture(e.pointerId)});
+view.addEventListener('pointermove',e=>{if(!zoneDrag)return;const [x,y]=vpos(e);zoneDrag.x1=x;zoneDrag.y1=y});
+view.addEventListener('pointerup',()=>{if(!zoneDrag)return;const z=zoneDrag;zoneDrag=null;zoneMode=false;
+  const x0=Math.min(z.x0,z.x1)/view.width,x1=Math.max(z.x0,z.x1)/view.width,y0=Math.min(z.y0,z.y1)/view.height,y1=Math.max(z.y0,z.y1)/view.height;
+  if(x1-x0>0.08&&y1-y0>0.08){zone=[Math.max(0,x0),Math.max(0,y0),Math.min(1,x1),Math.min(1,y1)];$('#zoneBtn').textContent='Hand zone: on (click to remove)'}else{$('#zoneBtn').textContent='Hand zone: off';$('#zoneBtn').classList.remove('on')}});
+$('#uncal').onclick=async()=>{await api('api/hand/reset',{method:'POST'});calibrated=false;status();say('Back to the general skin colour rule.')};
+$('#mirror').onclick=()=>{mirror=!mirror;$('#mirror').textContent='Mirror: '+(mirror?'on':'off');$('#mirror').classList.toggle('on',mirror);clearInk();trails=[[],[]]};
+$('#maskBtn').onclick=()=>{showMask=!showMask;$('#maskBtn').classList.toggle('on',showMask);$('#maskImg').style.display=showMask?'block':'none'};
+$('#drawBtn').onclick=()=>{drawOn=!drawOn;$('#drawBtn').textContent='Draw: '+(drawOn?'ON':'off');$('#drawBtn').classList.toggle('on',drawOn);pen=[null,null]};
+$('#clearBtn').onclick=clearInk;
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;const c=e.key.toLowerCase();
+  if(c==='z')calibrate();else if(c==='b')learnBackground();else if(c==='c')clearInk();else if(c==='d')$('#drawBtn').click();else if(c==='m')$('#mirror').click();else if(e.key==='Escape')stop()});
+loadModels();
+</script></body></html>

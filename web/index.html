@@ -53,7 +53,7 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
   </div>
   <div class="row">
     <button id="up">load a photo/scan</button><input id="file" type="file" accept="image/*" hidden>
-    <button id="prac">train on my handwriting</button><button id="save">save tuned model</button><button id="reset">reset model</button>
+    <button id="camBtn" title="open the camera page: track your fingers and write in the air" onclick="location.href='camera.html'">Start camera (finger tracking)</button><button id="prac">train on my handwriting</button><button id="save">save tuned model</button><button id="reset">reset model</button>
   </div>
   <div id="msg"></div>
 </section>
@@ -81,7 +81,7 @@ h2{font:700 14px var(--mono);margin:14px 0 6px}
 <section id="about" style="max-width:1000px;margin:0 auto;padding:0 16px 40px;font:13px/1.5 var(--mono)">
   <h2>about</h2>
   <p>MiniDL is a deep learning library written only in Java: tensors, backpropagation, convolutions, ResNet, LSTM, transformers, a model server. This page is its handwriting demo. The page draws; the Java program recognises.</p>
-  <p>Run it: <code>./run-web.sh</code> or <code>java -jar minidl-1.4.0.jar web</code>, then open <code>http://localhost:8080</code>. Source and instructions: <a href="https://github.com/manishn1877/minidl-java">github.com/manishn1877/minidl-java</a>.</p>
+  <p>Run it: <code>./run-web.sh</code> or <code>java -jar minidl-1.5.1.jar web</code>, then open <code>http://localhost:8080</code>. Source and instructions: <a href="https://github.com/manishn1877/minidl-java">github.com/manishn1877/minidl-java</a>.</p>
   <img src="mnist-training.svg" alt="training curves" style="max-width:100%" onerror="this.remove()">
 </section>
 <script>
@@ -95,7 +95,7 @@ const api=(p,o={})=>fetch(base()+p,Object.assign({},o,{headers:Object.assign({'X
 function offline(){
   const w=$('#warn');w.hidden=false;
   w.innerHTML='Cannot reach the MiniDL Java server at <b>'+(API||location.origin)+'</b>. This page only draws: the recognising is done by the Java program on your computer. '
-   +'Start it with <code>java -jar minidl-1.4.0.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
+   +'Start it with <code>java -jar minidl-1.5.1.jar web</code> (or <code>./run-web.sh</code>), then press connect. '
    +'<br>Server address: <input id="srv" size="24" value="'+(API||'http://localhost:8080')+'"> <button id="conn">connect</button>'
    +' <small>(Safari may block an https page from calling http://localhost: open the address the server prints instead.)</small>';
   $('#conn').onclick=()=>{API=$('#srv').value.trim();try{localStorage.setItem('minidlServer',API)}catch(e){}cur='';info().then(()=>{locked.forEach(e=>recog(e));previewLater(60)})};

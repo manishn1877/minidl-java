@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.5.1 - keep faces, walls and furniture out of the finger tracking
+
+Reported after testing with a real camera: the tracker counted the face and background objects as hands (colour alone cannot tell skin from a wooden wall or a face).
+- **Learn background** (button, key B, `POST /api/hand/background?step=begin|add|done|clear`): 15 pictures without hands become a reference (per-pixel mean and spread, follows slow light changes); only new things can be hands.
+- **Wave to start** (checkbox, default on): without a background a blob must move before it becomes a new hand; tracked hands may rest.
+- **Rejection with reasons:** faces (2 or more enclosed holes), blobs over 30% of the picture or touching 3 edges (walls), slivers with no palm, new blobs whose centre is at the face seen in the background (head moved). Rejected blobs are returned (`rejected`), drawn grey and listed.
+- **Hand zone** (drag a rectangle; `?zone=`), **ignore faces** checkbox (`?face=`), **wave** (`?wave=`).
+- **Fingertips must be narrow near the tip**: found with a drawn face (a forehead gave false fingers), also protects against forearms.
+- Camera page: guidance for the two steps, status for skin and background, learning countdown.
+- Tests: 331 (was 310): drawn room (wooden wall, shelf, face with eyes and mouth, hand): only the hand is found; wave to start; resting hand kept; background learned over HTTP; head moving; light drift +12; zone; holes; bad zone; too few background pictures. The whole scenario also runs through the page in a simulated browser.
+- Not tested: a real webcam with a real face and room. The face rule is a shape test and real faces vary.
+
+## 1.5.0 - camera and finger tracking in Java (Phase 7)
+
+Ideas from `amarlearning/Finger-Detection-and-Tracking` (OpenCV pipeline) and `sparshsinghal1618/finger-track` (browser app with a Start Camera button). Java only, no code copied.
+
+- `HandTracker`: skin colour (general YCrCb rule, or a histogram calibrated on 9 squares), cleanup, blobs, palm circle (distance transform), outline tracing, convex hull, convexity defects,
+  fingertips, finger count 0 to 5, up to two hands with stable slots, Kalman-smoothed pointer and speed (`Kalman1D`).
+- Server: `POST /api/hand`, `/api/hand/calibrate`, `/api/hand/reset`, `GET /api/hand/config`, and the page `/camera`. Same safety rules as the other writing calls (X-MiniDL header), pictures over 3 MB or 2.5 million pixels refused before decoding.
+- `web/camera.html`: **Start camera** (the browser reads the camera, Java analyses the pictures), live overlays, mirror, calibrate, skin-mask view, FPS / server time / pointer / speed, gesture names,
+  draw in the air with one finger (two fingers move, fist lifts the pen, open palm held 1.5 s clears), colour and pen size, trail, **recognise the drawing** with any MiniDL model (one character or a line), auto-recognise and auto-clear.
+  The handwriting page has a **Start camera (finger tracking)** button; `java -jar minidl.jar camera` starts the server and opens the page; the GitHub Pages site gets the camera page too (`SiteBuilder`).
+- Found and fixed while testing: the cleanup settings were tuned for 640x480 (erode/dilate twice) but the tracker works at 320x240, and JPEG compression (what a camera stream is) broke thin fingers in calibrated mode
+  (a 3-finger hand read as 0 or 1). A sweep over erode, smoothing and threshold found a stable setting (erode 1, smoothing radius 4, threshold 40); the tests now JPEG-compress their pictures.
+- Measured (drawn hands, JPEG quality 0.7, 4 skin tones, 3 sizes, 0 to 5 fingers): 72 of 72 counted right, 0 hands invented in empty pictures, 5 ms typical per picture, 13 fps through the page in a simulated browser.
+- Tests: 310 (was 283): 16 for the tracker, geometry and Kalman filter, 11 for the camera endpoints.
+- **Not tested: a real webcam with real hands.** Limits: colour based (face and arms are skin), counts fingers only (no thumbs-up / OK sign / which finger).
+
 ## 1.4.0 - character locking, auto-clear, capital + small letters, weight tying
 
 ### Web page
