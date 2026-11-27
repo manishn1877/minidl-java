@@ -13,7 +13,7 @@ public final class MiniDL {
     private MiniDL() {}
 
     /** Library version (kept in step with pom.xml). */
-    public static final String VERSION = "1.4.0";
+    public static final String VERSION = "1.5.1";
 
     private static final Map<String, String[]> COMMANDS = new LinkedHashMap<>();
     static {
@@ -30,6 +30,7 @@ public final class MiniDL {
         COMMANDS.put("precision",   new String[]{"MixedPrecisionDemo", "16-bit mixed-precision training"});
         COMMANDS.put("bench",       new String[]{"Benchmark", "speed and memory benchmarks"});
         COMMANDS.put("serve",       new String[]{"ModelServer", "model server (DJL-style): [--port N] [--store DIR] [--model name=file.bin,batch=16,delay=5,workers=1,max_workers=4,queue=100]"});
+        COMMANDS.put("camera",      new String[]{"CameraApp", "start the camera page (finger tracking, write in the air): [port=8080]"});
         COMMANDS.put("web",         new String[]{"HandwritingServer", "handwriting web app: [auto|model.bin] [port] [data-folder]"});
     }
 

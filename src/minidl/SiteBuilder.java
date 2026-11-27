@@ -23,8 +23,10 @@ public final class SiteBuilder {
         if (!Files.exists(page)) { System.out.println("page not found: " + page + " (run from the project folder)"); return; }
         docs.mkdirs();
         Files.copy(page, new File(docs, "index.html").toPath(), StandardCopyOption.REPLACE_EXISTING);
+        Path cam = page.resolveSibling("camera.html");
+        if (Files.exists(cam)) Files.copy(cam, new File(docs, "camera.html").toPath(), StandardCopyOption.REPLACE_EXISTING);
         new File(docs, ".nojekyll").createNewFile();
         if (new File(docs, "logs").isDirectory()) Plot.main(new String[]{new File(docs, "logs").getPath(), new File(docs, "mnist-training.svg").getPath()});
-        System.out.println("site written to " + docs + ": index.html, .nojekyll, mnist-training.svg");
+        System.out.println("site written to " + docs + ": index.html, camera.html, .nojekyll, mnist-training.svg");
     }
 }
