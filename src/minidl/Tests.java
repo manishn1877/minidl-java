@@ -77,8 +77,23 @@ public class Tests {
         hands();
         handServer();
         roomAndFace();
+        noLeakedThreads();
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
+    }
+
+    /**
+     * Every test must release what it started. A leftover non-daemon thread (an HTTP server's worker pool, say)
+     * keeps the JVM alive after main() returns, which hangs the build; fail loudly here instead.
+     */
+    static void noLeakedThreads() throws InterruptedException {
+        java.util.List<String> leaked = new ArrayList<>();
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t == Thread.currentThread() || t.isDaemon() || !t.isAlive()) continue;
+            t.join(5000); // a thread that is already shutting down gets a moment to finish; no fixed sleep
+            if (t.isAlive()) leaked.add(t.getName() + " (" + t.getState() + ")");
+        }
+        check("lifecycle: no non-daemon threads outlive the tests (leaked: " + leaked + ")", leaked.isEmpty());
     }
 
     // ------------------------------------------------------------------ tensor

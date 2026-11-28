@@ -116,9 +116,12 @@ public class HandwritingServer {
 
     /** Stops a test server and releases its worker threads. */
     static void stopHttp(HttpServer http) {
-        http.stop(0);
-        ExecutorService executor = HTTP_EXECUTORS.remove(http);
-        if (executor != null) executor.shutdownNow();
+        try {
+            http.stop(0);
+        } finally {
+            ExecutorService executor = HTTP_EXECUTORS.remove(http);
+            if (executor != null) ModelServer.shutdownAndAwait(executor);
+        }
     }
 
     static void addSlot(String file) throws IOException {
