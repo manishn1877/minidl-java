@@ -3,7 +3,9 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20   # safety net only: the suite takes well under a minute, and the tests themselves fail on leaked threads
     strategy:
+      fail-fast: false
       matrix:
         java: ['17', '21']
     steps:
@@ -12,9 +14,19 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-      - run: ./run.sh            # compile + the full test suite
-      - run: ./build-jar.sh      # jar, sources jar, javadoc jar (fails on any javadoc error)
-      - run: java -jar dist/minidl-1.4.0.jar version
+      - name: Compile, run the full test suite and the demos
+        timeout-minutes: 10
+        run: ./run.sh
+      - name: Build the library, sources and Javadoc JARs
+        run: ./build-jar.sh      # fails on any javadoc error
+      - name: Verify the packaged JAR
+        run: |
+          java -jar dist/minidl-1.5.1.jar version
+          unzip -l dist/minidl-1.5.1.jar | grep -q 'minidl/MiniDL.class'
+          unzip -l dist/minidl-1.5.1.jar | grep -q 'minidl/HandTracker.class'
+          unzip -l dist/minidl-1.5.1.jar | grep -q 'web/'
+          unzip -l dist/minidl-1.5.1-sources.jar | grep -q 'minidl/ModelServer.java'
+          unzip -l dist/minidl-1.5.1-javadoc.jar | grep -q 'index.html'
       - uses: actions/upload-artifact@v4
         if: matrix.java == '17'
         with:

@@ -6,7 +6,7 @@
 
   <groupId>io.github.manishn1877</groupId>
   <artifactId>minidl</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.1</version>
   <packaging>jar</packaging>
   <name>MiniDL</name>
   <description>A tiny deep learning library in pure Java: tensors, backprop, CNNs, transformers, quantization. No dependencies.</description>
@@ -21,7 +21,7 @@
   <build>
     <sourceDirectory>src</sourceDirectory>
     <resources>
-      <resource><directory>.</directory><includes><include>web/index.html</include></includes></resource>
+      <resource><directory>.</directory><includes><include>web/*.html</include></includes></resource>
     </resources>
     <plugins>
       <plugin>

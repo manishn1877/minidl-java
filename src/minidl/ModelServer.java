@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -46,6 +47,7 @@ public class ModelServer {
     private final Map<String, ModelPool> pools = new ConcurrentHashMap<>();
     private final File store;
     private HttpServer http;
+    private ExecutorService httpExecutor; // the HTTP worker threads are non-daemon: stop() must shut them down, or the JVM never exits
 
     public ModelServer(File store) { this.store = store; }
 
@@ -123,18 +125,46 @@ public class ModelServer {
     public ModelPool pool(String name) { return pools.get(name); }
 
     public void start(int port) throws IOException {
-        http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0); // localhost only
-        http.createContext("/", ex -> guard(ex, this::route));
-        http.setExecutor(Executors.newFixedThreadPool(16));
-        http.start();
+        if (http != null) throw new IllegalStateException("server already started");
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0); // localhost only
+        ExecutorService executor = Executors.newFixedThreadPool(16);
+        try {
+            server.createContext("/", ex -> guard(ex, this::route));
+            server.setExecutor(executor);
+            server.start();
+        } catch (RuntimeException e) {
+            executor.shutdownNow();
+            server.stop(0);
+            throw e;
+        }
+        http = server;
+        httpExecutor = executor;
     }
 
     public int port() { return http.getAddress().getPort(); }
 
+    /** Stops the HTTP server, releases its worker threads, and unloads every model. Safe to call twice. */
     public void stop() {
-        if (http != null) http.stop(0);
-        for (ModelPool p : pools.values()) p.close();
-        pools.clear();
+        try {
+            if (http != null) http.stop(0);
+            if (httpExecutor != null) shutdownAndAwait(httpExecutor);
+        } finally {
+            http = null;
+            httpExecutor = null;
+            for (ModelPool p : pools.values()) p.close();
+            pools.clear();
+        }
+    }
+
+    /** Shuts an executor down, waits for it to stop, and keeps the caller's interrupt flag if interrupted while waiting. */
+    static void shutdownAndAwait(ExecutorService executor) {
+        executor.shutdownNow();
+        try {
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS))
+                throw new IllegalStateException("HTTP worker threads did not stop within 10 s");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ------------------------------------------------------------------ HTTP

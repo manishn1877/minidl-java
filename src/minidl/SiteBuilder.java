@@ -22,9 +22,18 @@ public final class SiteBuilder {
         File docs = new File(args.length > 1 ? args[1] : "docs");
         if (!Files.exists(page)) { System.out.println("page not found: " + page + " (run from the project folder)"); return; }
         docs.mkdirs();
-        Files.copy(page, new File(docs, "index.html").toPath(), StandardCopyOption.REPLACE_EXISTING);
+        // Publish the handwriting demo separately; never overwrite the project overview.
+        Path handwriting = new File(docs, "handwriting.html").toPath();
+        Files.copy(page, handwriting, StandardCopyOption.REPLACE_EXISTING);
+
+        Path landing = new File(docs, "index.html").toPath();
+        if (!Files.exists(landing)) {
+            Files.copy(page, landing, StandardCopyOption.REPLACE_EXISTING);
+        }
+        Path cam = page.resolveSibling("camera.html");
+        if (Files.exists(cam)) Files.copy(cam, new File(docs, "camera.html").toPath(), StandardCopyOption.REPLACE_EXISTING);
         new File(docs, ".nojekyll").createNewFile();
         if (new File(docs, "logs").isDirectory()) Plot.main(new String[]{new File(docs, "logs").getPath(), new File(docs, "mnist-training.svg").getPath()});
-        System.out.println("site written to " + docs + ": index.html, .nojekyll, mnist-training.svg");
+        System.out.println("site written to " + docs + ": index.html (preserved), handwriting.html, camera.html, .nojekyll, mnist-training.svg");
     }
 }
