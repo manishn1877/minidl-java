@@ -15,7 +15,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handwriting recognition web app, in pure Java (only the JDK's built-in web server, no libraries).
@@ -36,6 +38,7 @@ import java.util.concurrent.Executors;
  *       POST /api/learn?w=&amp;h=&amp;label=7&amp;model=all   POST /api/save?model=all   POST /api/reset?model=all
  */
 public class HandwritingServer {
+    private static final Map<HttpServer, ExecutorService> HTTP_EXECUTORS = new ConcurrentHashMap<>();
     /** One loaded model. */
     static final class Slot {
         String key, name, file;
@@ -104,9 +107,18 @@ public class HandwritingServer {
         http.createContext("/api/hand/reset", ex -> guard(ex, HandwritingServer::handReset));
         http.createContext("/api/hand/background", ex -> guard(ex, HandwritingServer::handBackground));
         http.createContext("/api/hand/config", ex -> guard(ex, HandwritingServer::handConfig));
-        http.setExecutor(Executors.newFixedThreadPool(4));
+        ExecutorService executor = Executors.newFixedThreadPool(4);
+        HTTP_EXECUTORS.put(http, executor);
+        http.setExecutor(executor);
         http.start();
         return http;
+    }
+
+    /** Stops a test server and releases its worker threads. */
+    static void stopHttp(HttpServer http) {
+        http.stop(0);
+        ExecutorService executor = HTTP_EXECUTORS.remove(http);
+        if (executor != null) executor.shutdownNow();
     }
 
     static void addSlot(String file) throws IOException {

@@ -2091,7 +2091,7 @@ public class Tests {
                 && call.apply(new String[]{"POST", "/api/save", evil, "0", null}).statusCode() == 403 && call.apply(new String[]{"POST", "/api/reset", evil, "0", null}).statusCode() == 403);
             java.net.http.HttpResponse<String> p = call.apply(new String[]{"POST", "/api/predict?w=16&h=16&mode=single", ok, "1", "x"});
             check("web: a POST with the header works (a blank canvas gives no digits)", p.statusCode() == 200 && p.body().contains("\"digits\":[]"));
-        } finally { web.stop(0); HandwritingServer.slots.clear(); tiny.delete(); dir.delete(); }
+        } finally { HandwritingServer.stopHttp(web); HandwritingServer.slots.clear(); tiny.delete(); dir.delete(); }
     }
 
     // ---------------------------------------------------------------- capital + small letters (52 / 62 classes)
@@ -2168,7 +2168,7 @@ public class Tests {
             check("server: case and ref parameters are accepted, the answer says 'amb', a bad ref is a 400", up1.statusCode() == 200 && lo1.statusCode() == 200 && up1.body().contains("\"amb\":") && bad.statusCode() == 400);
             java.util.regex.Matcher m1 = java.util.regex.Pattern.compile("\"ch\":\"(.)\"").matcher(up1.body()), m2 = java.util.regex.Pattern.compile("\"ch\":\"(.)\"").matcher(lo1.body());
             check("server: forcing upper never answers a small letter, forcing lower never answers a capital", m1.find() && !Character.isLowerCase(m1.group(1).charAt(0)) && m2.find() && !Character.isUpperCase(m2.group(1).charAt(0)));
-        } finally { web.stop(0); HandwritingServer.slots.clear(); }
+        } finally { HandwritingServer.stopHttp(web); HandwritingServer.slots.clear(); }
     }
 
     // ---------------------------------------------------------------- weight tying (output layer shares the embedding table)
@@ -2474,7 +2474,7 @@ public class Tests {
                 java.net.http.HttpResponse<String> page = call.apply(new String[]{"GET", "/camera", "0"}, null);
                 check("camera page: /camera serves the page with the Start camera button", page.statusCode() == 200 && page.body().contains("Start camera") && page.body().contains("api/hand"));
             }
-        } finally { web.stop(0); HandwritingServer.tracker.reset(); HandwritingServer.tracker.clearBackground(); }
+        } finally { HandwritingServer.stopHttp(web); HandwritingServer.tracker.reset(); HandwritingServer.tracker.clearBackground(); }
     }
 
     // ---------------------------------------------------------------- faces, walls and furniture must not count as hands
